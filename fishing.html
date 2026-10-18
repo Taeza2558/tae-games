@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>เกมตกปลาของเต้</title>
+<style>
+  body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #1b2a33; }
+  canvas { display: block; border: 8px solid #4a3728; border-radius: 6px; max-width: 98vw; max-height: 96vh; }
+</style>
+</head>
+<body>
+<!-- canvas คือผ้าใบที่เราวาดทุกอย่างของเกมลงไป -->
+<canvas id="game" width="1280" height="920"></canvas>
+
+<script>
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const waterY = 400; // เส้นผิวน้ำ: ด้านบนคือฟ้า/บก ด้านล่างคือทะเลสาบ
+
+  // เวลาที่ผ่านไป (ใช้ทำให้น้ำ ปลา ทุ่นขยับ)
+  let t = 0;
+
+  // ความลึกจริง (เมตร) แปลงเป็นตำแหน่งในโลกเกม (พิกเซลใต้ผิวน้ำ): ตื้นยืดออกให้เห็นชัด ลึกบีบให้สั้นลง
+  const depthTable = [[0, 0], [1, 70], [5, 230], [10, 380], [50, 1050], [100, 1850]];
+  function depthToY(d) {
+    for (let i = 1; i < depthTable.length; i++) {
+      if (d <= depthTable[i][0]) {
+        let a = depthTable[i - 1], b = depthTable[i];
+        return a[1] + (b[1] - a[1]) * (d - a[0]) / (b[0] - a[0]);
+      }
+    }
+    return depthTable[depthTable.length - 1][1];
+  }
+  function yToDepth(py) { // แปลงกลับ: ตำแหน่งใต้ผิวน้ำ -> กี่เมตร
+    for (let i = 1; i < depthTable.length; i++) {
+      if (py <= depthTable[i][1]) {
+        let a = depthTable[i - 1], b = depthTable[i];
+        return a[0] + (b[0] - a[0]) * (py - a[1]) / (b[1] - a[1]);
+      }
+    }
+    return 100;
+  }
+  const worldH = waterY + 2050; // ความสูงทั้งโลก (ผิวน้ำจนถึงก้นทะเลสาบ)
+  let camY = 0;                 // กล้องเลื่อนลงไปกี่พิกเซล (0 = มองผิวน้ำ)
+
+  // ปลาในทะเลสาบ: ระดับ 1 = ง่าย (เขียว), 2 = กลาง (เหลือง), 3 = ยาก (แดง), 4 = ตำนาน (ทอง)
+  // ยิ่งยากยิ่งตัวใหญ่ ว่ายลึก และว่ายเร็ว
+  const levelColor = { 1: "#5fd068", 2: "#f2c94c", 3: "#eb5757", 4: "#ffd700", 5: "#b57bff" };
+  const levelName = { 1: "ง่าย", 2: "กลาง", 3: "ยาก", 4: "ตำนาน", 5: "ยักษ์ (ต้องมีเรือ)" };
+  // ===== ปลาจริงในธรรมชาติ (แต่ละสายพันธุ์วาดไม่เหมือนกัน) =====
+  // ratio = ความอ้วน (สูง/ยาว), back/belly = สีหลัง/ท้อง, fin = สีครีบ, tail = ทรงหาง
+  const species = {
+    nile:     { name: "ปลานิล",     ratio: 0.46, back: "#5d6b64", belly: "#cfc9a8", fin: "#8a5a5a", tail: "round", dorsal: [70, 150, 22], scales: true, stripes: 6 },
+    barb:     { name: "ปลาตะเพียน", ratio: 0.42, back: "#8c9aa0", belly: "#eef2f2", fin: "#e0683a", tail: "fork",  dorsal: [95, 135, 26], scales: true, stripes: 0 },
+    snakehead:{ name: "ปลาช่อน",    ratio: 0.22, back: "#4a4a2c", belly: "#b9b48a", fin: "#3a3a26", tail: "round", dorsal: [50, 165, 12], scales: true, stripes: 0, blotch: true },
+    pangas:   { name: "ปลาสวาย",    ratio: 0.32, back: "#5d6470", belly: "#e3e6ea", fin: "#4a4f5a", tail: "fork",  dorsal: [110, 130, 26], scales: false, stripes: 0, barbels: true },
+    gourami:  { name: "ปลาแรด",     ratio: 0.55, back: "#6b5a3a", belly: "#b59f6a", fin: "#7a6a44", tail: "round", dorsal: [60, 150, 26], scales: true, stripes: 0, lips: true },
+    chado:    { name: "ปลาชะโด",    ratio: 0.24, back: "#2f3326", belly: "#8c8a62", fin: "#c9642a", tail: "round", dorsal: [45, 170, 14], scales: true, stripes: 0, blotch: true },
+    buek:     { name: "ปลาบึก",     ratio: 0.34, back: "#4d5560", belly: "#dfe3e6", fin: "#3e454f", tail: "fork",  dorsal: [100, 130, 34], scales: false, stripes: 0, barbels: true, wide: true },
+  };
+
+  // วาดปลา 1 สายพันธุ์ลงผ้าใบเล็ก (หันหัวไปทางขวา) เก็บไว้ใช้ซ้ำ ไม่ต้องวาดใหม่ทุกเฟรม
+  function makeFishSprite(sp) {
+    return makeSprite(220, 100, function (g) {
+      let cy = 50, L = 200, bh = L * sp.ratio / 2; // bh = ครึ่งความหนาตัว
+      let nose = 205, tailBase = 55;
+      // ครีบหาง (วาดก่อนตัว)
+      g.fillStyle = sp.fin;
+      g.beginPath();
+      if (sp.tail === "fork") {
+        g.moveTo(tailBase + 6, cy); g.lineTo(10, cy - bh * 1.05); g.lineTo(30, cy); g.lineTo(10, cy + bh * 1.05);
+      } else {
+        g.moveTo(tailBase + 6, cy - bh * 0.25); g.quadraticCurveTo(8, cy - bh * 0.9, 8, cy); g.quadraticCurveTo(8, cy + bh * 0.9, tailBase + 6, cy + bh * 0.25);
+      }
+      g.closePath(); g.fill();
+      // ครีบหลัง
+      g.beginPath();
+      g.moveTo(sp.dorsal[0], cy - bh * 0.85);
+      g.quadraticCurveTo((sp.dorsal[0] + sp.dorsal[1]) / 2, cy - bh - sp.dorsal[2], sp.dorsal[1], cy - bh * 0.9);
+      g.closePath(); g.fill();
+      // ครีบท้อง
+      g.beginPath(); g.moveTo(120, cy + bh * 0.9); g.lineTo(100, cy + bh + 14); g.lineTo(140, cy + bh * 0.95); g.closePath(); g.fill();
+      // ตัวปลา ไล่สีหลังเข้ม-ท้องอ่อน
+      let bodyPath = function () {
+        g.beginPath();
+        g.moveTo(nose, cy);
+        g.quadraticCurveTo(nose - 25, cy - bh * (sp.wide ? 1.2 : 1.0), 120, cy - bh);
+        g.quadraticCurveTo(80, cy - bh, tailBase, cy - bh * 0.22);
+        g.lineTo(tailBase, cy + bh * 0.22);
+        g.quadraticCurveTo(80, cy + bh * 0.95, 120, cy + bh);
+        g.quadraticCurveTo(nose - 25, cy + bh * (sp.wide ? 1.2 : 1.0), nose, cy + bh * 0.15);
+        g.closePath();
+      };
+      let grad = g.createLinearGradient(0, cy - bh, 0, cy + bh);
+      grad.addColorStop(0, sp.back); grad.addColorStop(0.55, sp.back); grad.addColorStop(0.8, sp.belly); grad.addColorStop(1, sp.belly);
+      bodyPath(); g.fillStyle = grad; g.fill();
+      g.save(); bodyPath(); g.clip();
+      if (sp.scales) { // ลายเกล็ดเรียงเป็นวง ๆ
+        g.strokeStyle = "rgba(0,0,0,0.16)"; g.lineWidth = 1;
+        for (let x = tailBase + 8; x < 165; x += 9) for (let y = cy - bh; y < cy + bh; y += 8) {
+          g.beginPath(); g.arc(x + ((y / 8) % 2) * 4, y, 5, -Math.PI * 0.4, Math.PI * 0.4); g.stroke();
+        }
+      }
+      if (sp.stripes) { // ลายแถบตั้งเหมือนปลานิล
+        g.fillStyle = "rgba(20,25,20,0.28)";
+        for (let k = 0; k < sp.stripes; k++) g.fillRect(70 + k * 15, cy - bh, 5, bh * 2);
+      }
+      if (sp.blotch) { // ลายด่างเหมือนปลาช่อน/ชะโด
+        g.fillStyle = "rgba(0,0,0,0.3)";
+        for (let k = 0; k < 7; k++) { g.beginPath(); g.ellipse(70 + k * 18, cy - bh * 0.15 + (k % 2) * bh * 0.45, 8, 5, 0, 0, Math.PI * 2); g.fill(); }
+      }
+      g.fillStyle = "rgba(255,255,255,0.18)"; // ไฮไลต์มันวาวตามแนวหลัง
+      g.fillRect(tailBase, cy - bh * 0.85, 150, bh * 0.22);
+      g.restore();
+      // เหงือก + ครีบข้างลำตัว
+      g.strokeStyle = "rgba(0,0,0,0.4)"; g.lineWidth = 2;
+      g.beginPath(); g.arc(158, cy, bh * 0.75, -Math.PI * 0.4, Math.PI * 0.4); g.stroke();
+      g.fillStyle = sp.fin; g.globalAlpha = 0.85;
+      g.beginPath(); g.moveTo(150, cy + bh * 0.2); g.lineTo(126, cy + bh * 0.62); g.lineTo(152, cy + bh * 0.55); g.closePath(); g.fill();
+      g.globalAlpha = 1;
+      if (sp.lips) { g.fillStyle = "#c98a86"; g.beginPath(); g.ellipse(nose - 2, cy + bh * 0.1, 7, 5, 0, 0, Math.PI * 2); g.fill(); }
+      if (sp.barbels) { // หนวดปลาสวาย/บึก
+        g.strokeStyle = "#3a3a3a"; g.lineWidth = 2;
+        g.beginPath(); g.moveTo(nose - 4, cy + bh * 0.05); g.quadraticCurveTo(nose + 10, cy + 12, nose - 10, cy + bh * 0.9); g.stroke();
+        g.beginPath(); g.moveTo(nose - 6, cy - bh * 0.1); g.quadraticCurveTo(nose + 12, cy - 6, nose - 14, cy - bh * 0.6); g.stroke();
+      }
+      // ตา
+      let ex = nose - 34, ey = cy - bh * 0.28;
+      g.fillStyle = "#f2efe0"; g.beginPath(); g.arc(ex, ey, bh * 0.2 + 2, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#111"; g.beginPath(); g.arc(ex + 1, ey, bh * 0.13 + 1, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#fff"; g.beginPath(); g.arc(ex + 2, ey - 2, 1.6, 0, Math.PI * 2); g.fill();
+    });
+  }
+  for (let key in species) species[key].sprite = makeFishSprite(species[key]);
+
+  // ปลาในทะเลสาบ: เรียงตามความลึกจริง (ง่าย 1 ม. / กลาง 5 ม. / ยาก 10 ม. / ตำนาน 50 ม.)
+  let fishes = [
+    { x: 300, depth: 0.8, size: 26, level: 1, speed: 0.8, dir: 1,  sp: "nile" },
+    { x: 700, depth: 1.0, size: 22, level: 1, speed: 0.6, dir: -1, sp: "barb" },
+    { x: 950, depth: 1.2, size: 26, level: 1, speed: 1.0, dir: 1,  sp: "nile" },
+    { x: 500, depth: 4.6, size: 44, level: 2, speed: 1.3, dir: -1, sp: "snakehead" },
+    { x: 1100, depth: 5.4, size: 46, level: 2, speed: 1.1, dir: 1, sp: "pangas" },
+    { x: 400, depth: 9.5, size: 54, level: 3, speed: 1.8, dir: 1,  sp: "gourami" },
+    { x: 850, depth: 10.5, size: 64, level: 3, speed: 1.6, dir: -1, sp: "chado" },
+    { x: 640, depth: 50, size: 100, level: 4, speed: 1.2, dir: 1,  sp: "buek" }, // ปลาบึก: ปลาน้ำจืดยักษ์ในตำนานแม่น้ำโขง
+  ];
+  for (let f of fishes) f.y = waterY + depthToY(f.depth);
+
+  // วาดปลา 1 ตัว: ใช้ภาพของสายพันธุ์นั้น ส่ายตัวเบา ๆ เหมือนว่ายน้ำ + แสงสีบอกระดับความยาก + ป้ายชื่อ
+  function drawFish(f) {
+    let spec = species[f.sp];
+    let w = f.size * 2.6, h = w * 100 / 220;
+    let sway = Math.sin(t * 0.12 + f.x * 0.05) * 0.06;
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.fillStyle = levelColor[f.level]; // แสงรอบตัวบอกระดับ
+    ctx.globalAlpha = f.level === 4 ? 0.35 + Math.sin(t * 0.1) * 0.12 : 0.22;
+    ctx.beginPath(); ctx.ellipse(0, 0, w * 0.58, h * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.scale(f.dir, 1);
+    ctx.rotate(sway);
+    ctx.drawImage(spec.sprite, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(spec.name, 0, h * 0.62 + 12);
+    ctx.restore();
+  }
+
+  // สัตว์ยักษ์แบบพิกเซลอาร์ต: วาดบนผ้าใบเล็ก ๆ ก่อน แล้วขยายโดยปิดการเกลี่ยสี ภาพเลยเป็นเม็ดพิกเซลเหมือนในรูปที่เต้ให้มา
+  function makeSprite(w, h, drawFn) {
+    let c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    let g = c.getContext("2d");
+    drawFn(g);
+    return c;
+  }
+
+  // วาฬยักษ์หลังมีหนาม (หันหน้าไปทางขวา)
+  const whaleSprite = makeSprite(150, 60, function (g) {
+    g.fillStyle = "#33475b"; // ตัวสีเทาน้ำเงิน
+    g.beginPath();
+    g.moveTo(4, 6); g.lineTo(24, 24);
+    g.quadraticCurveTo(75, 8, 128, 24);
+    g.quadraticCurveTo(148, 34, 138, 44);
+    g.quadraticCurveTo(100, 56, 60, 48);
+    g.lineTo(24, 34); g.lineTo(6, 52); g.lineTo(14, 30);
+    g.closePath(); g.fill();
+    g.fillStyle = "#7d97b0"; // ท้องสีอ่อน
+    g.beginPath();
+    g.moveTo(40, 44); g.quadraticCurveTo(95, 54, 134, 42); g.quadraticCurveTo(100, 46, 40, 40); g.fill();
+    g.fillStyle = "#8b8f96"; // หนามบนหลัง
+    for (let x = 40; x < 100; x += 9) { g.beginPath(); g.moveTo(x, 17); g.lineTo(x + 3, 6 + (x % 5)); g.lineTo(x + 6, 17); g.fill(); }
+    g.fillStyle = "#e6f0ff"; g.fillRect(120, 26, 3, 3); // ตา
+    g.fillStyle = "#1c2a38"; g.fillRect(126, 34, 14, 2); // ปาก
+  });
+
+  // ฉลามสัตว์ประหลาดปากแดงฟันแหลม (หันหน้าไปทางซ้าย)
+  const sharkSprite = makeSprite(120, 64, function (g) {
+    g.fillStyle = "#6b7178"; // หัวสีเทา
+    g.beginPath();
+    g.moveTo(112, 10); g.lineTo(40, 6); g.lineTo(6, 28); g.lineTo(40, 34);
+    g.lineTo(112, 34); g.closePath(); g.fill();
+    g.fillStyle = "#4a4f55"; // แผ่นเกราะบนหัว
+    for (let x = 44; x < 110; x += 12) g.fillRect(x, 8, 8, 6);
+    g.fillStyle = "#6b7178"; // ขากรรไกรล่าง
+    g.beginPath(); g.moveTo(6, 30); g.lineTo(40, 58); g.lineTo(112, 56); g.lineTo(112, 34); g.closePath(); g.fill();
+    g.fillStyle = "#b03a48"; // ในปากสีแดง
+    g.beginPath(); g.moveTo(10, 30); g.lineTo(42, 20); g.lineTo(100, 24); g.lineTo(100, 46); g.lineTo(42, 52); g.closePath(); g.fill();
+    g.fillStyle = "#fff"; // ฟันแหลมบน-ล่าง
+    for (let x = 14; x < 96; x += 9) {
+      g.beginPath(); g.moveTo(x, 24 + (x > 40 ? 0 : 6)); g.lineTo(x + 4, 33); g.lineTo(x + 8, 24 + (x > 40 ? 0 : 6)); g.fill();
+      g.beginPath(); g.moveTo(x, 50); g.lineTo(x + 4, 41); g.lineTo(x + 8, 50); g.fill();
+    }
+    g.fillStyle = "#ffdd55"; g.fillRect(34, 12, 4, 4); // ตา
+  });
+
+  // สัตว์ยักษ์ (ระดับ 5) ว่ายอยู่ใต้น้ำลึก — ตัวใหญ่มาก ต้องมีเรือถึงจะสู้ได้
+  let giants = [
+    { sprite: whaleSprite, x: 500, depth: 100, w: 480, h: 192, speed: 0.5, dir: 1 },
+    { sprite: sharkSprite, x: 1000, depth: 97, w: 330, h: 176, speed: 0.7, dir: -1 },
+  ];
+  for (let gt of giants) gt.y = waterY + depthToY(gt.depth);
+  function drawGiant(gt) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = false; // ปิดการเกลี่ยสี ให้เห็นเป็นเม็ดพิกเซล
+    ctx.translate(gt.x, gt.y);
+    // ต้นฉบับ whale หันขวา (dir 1) / shark หันซ้าย (dir -1) — พลิกเมื่อทิศไม่ตรงกับทิศตั้งต้น
+    let baseDir = gt.sprite === whaleSprite ? 1 : -1;
+    ctx.scale(gt.dir === baseDir ? 1 : -1, 1);
+    ctx.globalAlpha = 0.92;
+    ctx.drawImage(gt.sprite, -gt.w / 2, -gt.h / 2, gt.w, gt.h);
+    ctx.restore();
+  }
+
+  // อู่เรือ: เรือประมงวางอยู่บนเกาะ มีป้ายราคา (ซื้อได้ทีหลังตอนทำระบบเงิน)
+  function drawBoatShop() {
+    let bx = 850, ground = waterY - 20;
+    ctx.save();
+    ctx.translate(bx + 100, ground - 20);
+    ctx.fillStyle = "#a0522d";
+    ctx.beginPath(); ctx.moveTo(-90, -14); ctx.lineTo(90, -14); ctx.lineTo(62, 22); ctx.lineTo(-62, 22); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#d9a066"; ctx.fillRect(-90, -18, 180, 6);
+    ctx.fillStyle = "#4a2f18"; ctx.fillRect(-4, -100, 8, 86); // เสากระโดง
+    ctx.fillStyle = "#fff8dc"; // ใบเรือ
+    ctx.beginPath(); ctx.moveTo(6, -98); ctx.lineTo(70, -30); ctx.lineTo(6, -30); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = "#6b4423"; ctx.fillRect(bx + 30, ground - 10, 140, 10); // แท่นวางเรือ
+    // ป้ายอู่เรือ + ราคา
+    let sx = 800, sy = ground - 120;
+    ctx.fillStyle = "#4a2f18"; ctx.fillRect(sx + 48, sy + 60, 6, 60); // เสาป้าย
+    ctx.fillStyle = "#fff8dc"; ctx.fillRect(sx, sy, 100, 62);
+    ctx.strokeStyle = "#4a2f18"; ctx.lineWidth = 3; ctx.strokeRect(sx, sy, 100, 62);
+    ctx.fillStyle = "#4a2f18"; ctx.textAlign = "center";
+    ctx.font = "bold 18px sans-serif"; ctx.fillText("อู่เรือ", sx + 50, sy + 22);
+    ctx.font = "14px sans-serif"; ctx.fillText("เรือประมง", sx + 50, sy + 40);
+    ctx.fillText("500 เหรียญ", sx + 50, sy + 56);
+  }
+
+  // ฟ้า ดวงอาทิตย์ เมฆ เนินเขา
+  function drawSky() {
+    let sky = ctx.createLinearGradient(0, 0, 0, waterY);
+    sky.addColorStop(0, "#6ec6ff");
+    sky.addColorStop(1, "#ffe9b3");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, waterY);
+    ctx.fillStyle = "#fff3a8"; // อาทิตย์ยามเช้า
+    ctx.beginPath(); ctx.arc(1050, 130, 55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.9)"; // เมฆลอย
+    for (let i = 0; i < 3; i++) {
+      let cx = ((t * 0.3 + i * 500) % (W + 300)) - 150, cy = 90 + i * 55;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+      ctx.arc(cx + 35, cy - 10, 38, 0, Math.PI * 2);
+      ctx.arc(cx + 75, cy, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#7fae7a"; // เนินเขาไกล ๆ
+    ctx.beginPath(); ctx.moveTo(0, waterY); ctx.quadraticCurveTo(200, 250, 450, waterY); ctx.fill();
+    ctx.fillStyle = "#5e9a63";
+    ctx.beginPath(); ctx.moveTo(300, waterY); ctx.quadraticCurveTo(700, 220, 1100, waterY); ctx.fill();
+    ctx.fillStyle = "#4b8a55";
+    ctx.beginPath(); ctx.moveTo(900, waterY); ctx.quadraticCurveTo(1150, 290, W, waterY); ctx.fill();
+  }
+
+  // ทะเลสาบ: น้ำไล่สีจากฟ้าใสลงไปน้ำลึกสีเข้ม + คลื่นเส้นขาว
+  function drawWater() {
+    let g = ctx.createLinearGradient(0, waterY, 0, worldH);
+    g.addColorStop(0, "#4fb3d9");
+    g.addColorStop(0.15, "#1f6f9c");
+    g.addColorStop(0.5, "#0d3c5e");
+    g.addColorStop(1, "#02080f");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, waterY, W, worldH - waterY);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    for (let row = 0; row < 4; row++) {
+      let y = waterY + 12 + row * 22;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 20) {
+        let yy = y + Math.sin(x * 0.03 + t * 0.05 + row) * 3;
+        if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // เกาะกลางทะเลสาบ + ท่าเรือไม้ยื่นออกไปทางซ้าย: พื้นหญ้า+ทราย มองตัดขวางเห็นใต้เกาะลาดลงไปในน้ำ
+  const pierLeft = 230;                       // ปลายท่าเรือ (ยื่นออกไปในน้ำ)
+  const islandLeft = 420, islandRight = 1130; // ขอบซ้าย-ขวาของเกาะ
+
+  // เรือพายเล็กผูกไว้ข้างท่าเรือ (โยกเบา ๆ ตามคลื่น)
+  function drawRowboat() {
+    let bob = Math.sin(t * 0.06) * 3;
+    ctx.save();
+    ctx.translate(345, waterY + 18 + bob);
+    ctx.fillStyle = "#8b5a2b";
+    ctx.beginPath(); ctx.moveTo(-42, -10); ctx.lineTo(42, -10); ctx.lineTo(28, 12); ctx.lineTo(-28, 12); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#c68b52"; ctx.fillRect(-42, -13, 84, 5);
+    ctx.strokeStyle = "#4a2f18"; ctx.lineWidth = 3; // ไม้พาย
+    ctx.beginPath(); ctx.moveTo(-6, -10); ctx.lineTo(22, -34); ctx.stroke();
+    ctx.restore();
+  }
+
+  // ท่าเรือไม้: แผ่นไม้ปูพื้น เสาตอกลงไปในน้ำ ราวเชือก โคมไฟที่ปลายท่า
+  function drawPier() {
+    let top = waterY - 20;
+    let x0 = pierLeft, x1 = islandLeft + 30;
+    ctx.fillStyle = "#6b4423"; // เสาใต้ท่า
+    for (let x = x0 + 14; x < x1; x += 55) ctx.fillRect(x, top + 10, 12, 82);
+    ctx.fillStyle = "#8a5a2f"; // พื้นท่า
+    ctx.fillRect(x0, top, x1 - x0, 14);
+    ctx.strokeStyle = "#5a3a1e"; ctx.lineWidth = 2; // ร่องแผ่นไม้
+    for (let x = x0; x < x1; x += 22) { ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + 14); ctx.stroke(); }
+    // ราวเชือกด้านหลัง (เสาเล็ก + เชือกโค้ง)
+    ctx.fillStyle = "#5a3a1e";
+    for (let x = x0 + 8; x < x1; x += 55) ctx.fillRect(x, top - 30, 6, 30);
+    ctx.strokeStyle = "#e8d9a8"; ctx.lineWidth = 2;
+    for (let x = x0 + 11; x < x1 - 55; x += 55) {
+      ctx.beginPath(); ctx.moveTo(x, top - 28); ctx.quadraticCurveTo(x + 27, top - 16, x + 55, top - 28); ctx.stroke();
+    }
+    // โคมไฟที่ปลายท่า
+    ctx.fillStyle = "#3a3a3a"; ctx.fillRect(x0 + 6, top - 62, 5, 32);
+    ctx.fillStyle = "rgba(255,230,140,0.35)";
+    ctx.beginPath(); ctx.arc(x0 + 9, top - 66, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffe27a";
+    ctx.beginPath(); ctx.arc(x0 + 9, top - 66, 8, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawIsland() {
+    let top = waterY - 20;
+    // ใต้เกาะที่จมน้ำ (ทรายลาดลง)
+    let sg = ctx.createLinearGradient(0, top, 0, 560);
+    sg.addColorStop(0, "#d8b56b"); sg.addColorStop(1, "#6b5a3a");
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(islandLeft - 40, top + 20);
+    ctx.quadraticCurveTo(islandLeft + 30, 470, islandLeft + 160, 560);
+    ctx.lineTo(islandRight - 160, 560);
+    ctx.quadraticCurveTo(islandRight - 30, 470, islandRight + 40, top + 20);
+    ctx.closePath(); ctx.fill();
+    // ก้อนหินใต้น้ำ
+    ctx.fillStyle = "#7f7f86";
+    ctx.beginPath(); ctx.ellipse(islandLeft + 50, 500, 26, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(islandRight - 70, 520, 32, 16, 0, 0, Math.PI * 2); ctx.fill();
+    // ผิวเกาะด้านบน: ทรายขอบ + หญ้าเขียว
+    ctx.fillStyle = "#e8cf8a";
+    ctx.beginPath();
+    ctx.moveTo(islandLeft - 40, top + 22);
+    ctx.quadraticCurveTo(islandLeft - 10, top - 6, islandLeft + 40, top);
+    ctx.lineTo(islandRight - 40, top);
+    ctx.quadraticCurveTo(islandRight + 10, top - 6, islandRight + 40, top + 22);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#5fae5a";
+    ctx.fillRect(islandLeft + 20, top - 8, islandRight - islandLeft - 40, 14);
+    ctx.fillStyle = "#4b9a4a"; // กอหญ้า
+    for (let x = islandLeft + 30; x < islandRight - 30; x += 24) {
+      ctx.beginPath(); ctx.moveTo(x, top - 8); ctx.lineTo(x + 4, top - 18); ctx.lineTo(x + 8, top - 8); ctx.fill();
+    }
+    // ดอกไม้เล็ก ๆ
+    let flowerColors = ["#ff7aa8", "#ffd84d", "#ffffff"];
+    for (let i = 0; i < 12; i++) {
+      let fx = islandLeft + 60 + i * 55 + (i % 3) * 9;
+      ctx.fillStyle = flowerColors[i % 3];
+      ctx.beginPath(); ctx.arc(fx, top - 12 - (i % 2) * 3, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+    // พุ่มไม้ + ก้อนหินบนเกาะ
+    for (let bx of [islandLeft + 110, islandRight - 150]) {
+      ctx.fillStyle = "#3a8a45";
+      ctx.beginPath(); ctx.arc(bx, top - 10, 22, Math.PI, 0); ctx.arc(bx + 26, top - 8, 18, Math.PI, 0); ctx.fill();
+    }
+    ctx.fillStyle = "#8a8a92";
+    ctx.beginPath(); ctx.ellipse(islandRight - 250, top - 4, 20, 12, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = "#9c9ca6";
+    ctx.beginPath(); ctx.ellipse(islandLeft + 200, top - 3, 14, 9, 0, Math.PI, 0); ctx.fill();
+    // ต้นมะพร้าวสองต้น
+    for (let tx of [islandLeft + 45, islandRight - 45]) {
+      ctx.strokeStyle = "#7a5230"; ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(tx, top); ctx.quadraticCurveTo(tx + 14, top - 70, tx + 6, top - 130); ctx.stroke();
+      ctx.fillStyle = "#3f9a4a";
+      for (let a = -2; a <= 2; a++) {
+        ctx.beginPath();
+        ctx.moveTo(tx + 6, top - 130);
+        ctx.quadraticCurveTo(tx + 6 + a * 34, top - 165 + Math.abs(a) * 12, tx + 6 + a * 52, top - 120 + Math.abs(a) * 14);
+        ctx.quadraticCurveTo(tx + 6 + a * 30, top - 140, tx + 6, top - 130);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#6b4a1f"; // ลูกมะพร้าว
+      ctx.beginPath(); ctx.arc(tx + 2, top - 124, 6, 0, Math.PI * 2); ctx.arc(tx + 14, top - 122, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    // ฟองคลื่นสีขาวตรงแนวน้ำ ทั้งสองฝั่งเกาะ
+    ctx.strokeStyle = "rgba(255,255,255," + (0.55 + Math.sin(t * 0.06) * 0.25) + ")"; ctx.lineWidth = 3;
+    for (let side of [-1, 1]) {
+      let ex = side < 0 ? islandLeft - 40 : islandRight + 40;
+      ctx.beginPath(); ctx.moveTo(ex, waterY + 6); ctx.quadraticCurveTo(ex + side * 18, waterY + 10, ex + side * 34, waterY + 6); ctx.stroke();
+    }
+  }
+
+  // ตำแหน่งตัวเต้บนเกาะ (เดินซ้าย-ขวาได้) กับทิศที่หันหน้า (1 = ขวา, -1 = ซ้าย)
+  let playerX = 760, facing = 1, walking = false;
+  const playerSpeed = 3.2;
+  let keys = { left: false, right: false, up: false, down: false };
+  document.addEventListener("keydown", function (e) {
+    let k = e.key.toLowerCase();
+    if (e.key === "ArrowLeft" || k === "a") keys.left = true;
+    if (e.key === "ArrowRight" || k === "d") keys.right = true;
+    if (e.key === "ArrowUp" || k === "w") keys.up = true;
+    if (e.key === "ArrowDown" || k === "s") keys.down = true;
+  });
+  document.addEventListener("keyup", function (e) {
+    let k = e.key.toLowerCase();
+    if (e.key === "ArrowLeft" || k === "a") keys.left = false;
+    if (e.key === "ArrowRight" || k === "d") keys.right = false;
+    if (e.key === "ArrowUp" || k === "w") keys.up = false;
+    if (e.key === "ArrowDown" || k === "s") keys.down = false;
+  });
+
+  // ตัวเต้: นักตกปลา หมวกฟางสีเหลือง เสื้อแดง ถือคันเบ็ด (พลิกตามทิศที่หัน)
+  // เดินไปถึงขอบเกาะแล้วหันออกน้ำ ถึงจะปล่อยสายเบ็ดลงน้ำได้
+  function drawPlayer() {
+    let py = waterY - 20;
+    let atLeftEdge = playerX <= pierLeft + 50 && facing === -1;
+    let atRightEdge = playerX >= islandRight - 60 && facing === 1;
+    let casting = atLeftEdge || atRightEdge;
+    let step = walking ? Math.sin(t * 0.3) * 7 : 0; // ขาก้าวสลับตอนเดิน
+    ctx.save();
+    ctx.translate(playerX, 0);
+    ctx.scale(facing, 1);
+    ctx.fillStyle = "#3b3b8a"; // ขา
+    ctx.fillRect(-14 + step, py - 40, 10, 40);
+    ctx.fillRect(4 - step, py - 40, 10, 40);
+    ctx.fillStyle = "#d94a4a"; // เสื้อ
+    ctx.fillRect(-20, py - 100, 40, 62);
+    ctx.fillStyle = "#f1c9a0"; // หัว
+    ctx.beginPath(); ctx.arc(0, py - 122, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#111"; ctx.fillRect(5, py - 126, 4, 6); // ตา
+    ctx.fillStyle = "#e8c548"; // หมวกฟาง
+    ctx.beginPath(); ctx.ellipse(0, py - 138, 36, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(-16, py - 158, 32, 22);
+    ctx.strokeStyle = "#f1c9a0"; ctx.lineWidth = 8; // แขนถือคัน
+    ctx.beginPath(); ctx.moveTo(15, py - 85); ctx.lineTo(45, py - 95); ctx.stroke();
+    ctx.strokeStyle = ["#5a3a1e", "#3f7fbf", "#222222", "#c0c8d4"][upLevel.rod]; ctx.lineWidth = 5; // คันเบ็ด (สีเปลี่ยนตามเลเวล)
+    ctx.beginPath(); ctx.moveTo(30, py - 90); ctx.lineTo(190, py - 230); ctx.stroke();
+    if (casting) { // สายเบ็ด + ทุ่นลอยเด้งตามน้ำ
+      let bx = 200, by = waterY + 8 + Math.sin(t * 0.08) * 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(190, py - 230); ctx.quadraticCurveTo(200, py - 100, bx, by); ctx.stroke();
+      ctx.fillStyle = "#ff4d4d"; ctx.beginPath(); ctx.arc(bx, by, 9, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+
+  // ===== ระบบเหรียญ + อัปเกรดอุปกรณ์ =====
+  // ทุกอย่างเริ่มที่เลเวล 0 ซื้อทีละเลเวลที่ร้านลุงหนวด (เดินเข้าใกล้ร้านแล้วกด E)
+  let coins = 300; // เหรียญเริ่มต้น (เอาไว้ลองซื้อของก่อน)
+  const upgrades = [
+    { id: "rod",  name: "คันเบ็ด", levels: ["ไม้ไผ่", "ไฟเบอร์", "คาร์บอน", "ไททาเนียม"], prices: [0, 150, 400, 900], effect: "ดึงปลาตัวใหญ่ได้" },
+    { id: "line", name: "สายเบ็ด", levels: ["ด้าย", "ไนลอน", "สายถัก", "สายเหล็ก"],      prices: [0, 100, 300, 700], effect: "ทนแรงดึง สายไม่ขาด" },
+    { id: "hook", name: "ตะขอ",    levels: ["เล็ก", "กลาง", "ใหญ่", "ตะขอสมุทร"],        prices: [0, 80, 250, 600],  effect: "เกี่ยวติดปลาง่ายขึ้น" },
+    { id: "reel", name: "รอก",     levels: ["มือหมุน", "เกียร์", "ไฟฟ้า", "ไฮเทค"],       prices: [0, 200, 500, 1000], effect: "หย่อนสายลงลึกได้ขึ้น" },
+    { id: "bait", name: "เหยื่อ",  levels: ["ไส้เดือน", "กุ้ง", "ปลาเหยื่อ", "เหยื่อทอง"], prices: [0, 60, 200, 500],  effect: "ล่อปลาหายากได้" },
+    { id: "boat", name: "เรือ",    levels: ["ไม่มี", "เรือพาย", "เรือประมง", "เรือใหญ่"],  prices: [0, 250, 500, 1200], effect: "ออกไปน้ำลึกสุด (ยักษ์ต้องเรือใหญ่)" },
+  ];
+  let upLevel = { rod: 0, line: 0, hook: 0, reel: 0, bait: 0, boat: 0 };
+  let shopOpen = false;
+  let shopMessage = "";
+
+  // ตอนนี้ตกปลาได้ถึงระดับไหน: รอกยิ่งดีหย่อนสายลึก (ระดับ 1-4) ส่วนยักษ์ (5) ต้องมีเรือใหญ่
+  function reachTier() {
+    let tier = 1 + upLevel.reel;
+    if (upLevel.boat >= 3) tier = 5;
+    return Math.min(tier, 5);
+  }
+
+  function nearShop() { return playerX > 500 && playerX < 860; }
+
+  document.addEventListener("keydown", function (e) {
+    let k = e.key.toLowerCase();
+    if (k === "e" && (nearShop() || shopOpen)) { shopOpen = !shopOpen; shopMessage = ""; return; }
+    if (k === "escape") shopOpen = false;
+    if (shopOpen && k >= "1" && k <= "6") {
+      let u = upgrades[Number(k) - 1];
+      let lv = upLevel[u.id];
+      if (lv >= u.levels.length - 1) shopMessage = u.name + " เลเวลสูงสุดแล้ว!";
+      else if (coins < u.prices[lv + 1]) shopMessage = "เหรียญไม่พอ ต้องใช้ " + u.prices[lv + 1] + " เหรียญ";
+      else { coins -= u.prices[lv + 1]; upLevel[u.id]++; shopMessage = "ซื้อ " + u.name + " " + u.levels[upLevel[u.id]] + " แล้ว!"; }
+    }
+  });
+
+  // ป้ายบอกความลึก: ปลาหาง่ายอยู่ตื้น ปลาหายากอยู่ลึก
+  function drawDepthLabels() {
+    let zones = [
+      { d: 1,   label: "1 เมตร: ปลาระดับง่าย",      color: levelColor[1] },
+      { d: 5,   label: "5 เมตร: ปลาระดับกลาง",      color: levelColor[2] },
+      { d: 10,  label: "10 เมตร: ปลาระดับยาก",      color: levelColor[3] },
+      { d: 50,  label: "50 เมตร: ปลาระดับตำนาน",    color: levelColor[4] },
+      { d: 100, label: "100 เมตร: สัตว์ยักษ์",       color: levelColor[5] },
+    ];
+    ctx.textAlign = "right"; ctx.font = "bold 15px sans-serif";
+    for (let z of zones) {
+      let y = waterY + depthToY(z.d);
+      ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.setLineDash([8, 8]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = z.color; ctx.fillText(z.label, W - 14, y - 6);
+    }
+  }
+
+  // แถบเหรียญ + ระดับที่ตกได้ (มุมล่างขวา) และคำใบ้ตอนเข้าใกล้ร้าน
+  function drawHUD() {
+    ctx.fillStyle = "rgba(20,20,35,0.8)"; ctx.fillRect(W - 270, H - 78, 250, 58);
+    ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2; ctx.strokeRect(W - 270, H - 78, 250, 58);
+    ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 20px sans-serif";
+    ctx.fillText("🪙 เหรียญ: " + coins, W - 256, H - 52);
+    ctx.fillStyle = "#fff"; ctx.font = "14px sans-serif";
+    ctx.fillText("ตกปลาได้ถึงระดับ: " + levelName[reachTier()].split(" ")[0], W - 256, H - 30);
+    if (nearShop() && !shopOpen) {
+      ctx.textAlign = "center"; ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(playerX - 90, waterY - 230, 180, 30);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif"; ctx.fillText("กด E เปิดร้านลุงหนวด", playerX, waterY - 209);
+    }
+  }
+
+  // หน้าต่างร้านอัปเกรด: 6 อย่าง กดเลข 1-6 เพื่อซื้อเลเวลถัดไป
+  function drawShopPanel() {
+    let px = 240, py = 90, pw = 800, ph = 500;
+    ctx.fillStyle = "rgba(20,15,10,0.92)"; ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 4; ctx.strokeRect(px, py, pw, ph);
+    ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 28px sans-serif";
+    ctx.fillText("ร้านลุงหนวด — อัปเกรดอุปกรณ์", px + 24, py + 44);
+    ctx.textAlign = "right"; ctx.fillText("🪙 " + coins, px + pw - 24, py + 44);
+    for (let i = 0; i < upgrades.length; i++) {
+      let u = upgrades[i], lv = upLevel[u.id];
+      let ry = py + 70 + i * 62;
+      ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fillRect(px + 16, ry, pw - 32, 54);
+      ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 22px sans-serif";
+      ctx.fillText("[" + (i + 1) + "]", px + 28, ry + 34);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 20px sans-serif"; ctx.fillText(u.name, px + 84, ry + 24);
+      ctx.fillStyle = "#b8c4d0"; ctx.font = "14px sans-serif"; ctx.fillText(u.effect, px + 84, ry + 44);
+      // ช่องเลเวล 4 ช่อง (เต็ม = ซื้อแล้ว)
+      for (let l = 0; l < u.levels.length; l++) {
+        ctx.fillStyle = l <= lv ? "#5fd068" : "#3a3a44";
+        ctx.fillRect(px + 330 + l * 26, ry + 14, 22, 12);
+      }
+      ctx.fillStyle = "#fff"; ctx.font = "15px sans-serif";
+      ctx.fillText("ตอนนี้: " + u.levels[lv], px + 330, ry + 46);
+      ctx.textAlign = "right";
+      if (lv < u.levels.length - 1) {
+        ctx.fillStyle = coins >= u.prices[lv + 1] ? "#ffd700" : "#eb5757";
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillText(u.levels[lv + 1] + "  " + u.prices[lv + 1] + " 🪙", px + pw - 30, ry + 34);
+      } else { ctx.fillStyle = "#5fd068"; ctx.font = "bold 16px sans-serif"; ctx.fillText("สูงสุดแล้ว", px + pw - 30, ry + 34); }
+    }
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe9b3"; ctx.font = "bold 18px sans-serif";
+    ctx.fillText(shopMessage || "กดเลข 1-6 เพื่อซื้อ  |  E หรือ Esc เพื่อปิดร้าน", px + pw / 2, py + ph - 16);
+  }
+
+  // ร้านค้าริมฝั่งขวา + NPC ลุงหนวด ผู้ขายอุปกรณ์
+  function drawShop() {
+    let sx = 1010, sy = waterY;
+    ctx.fillStyle = "#c98f55"; // ตัวร้าน
+    ctx.fillRect(sx, sy - 150, 200, 150);
+    ctx.fillStyle = "#a03a3a"; // หลังคา
+    ctx.beginPath(); ctx.moveTo(sx - 20, sy - 150); ctx.lineTo(sx + 100, sy - 220); ctx.lineTo(sx + 220, sy - 150); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#4a2f18"; // ประตู
+    ctx.fillRect(sx + 20, sy - 90, 50, 90);
+    ctx.fillStyle = "#fff8dc"; // ป้ายร้าน
+    ctx.fillRect(sx + 85, sy - 130, 100, 40);
+    ctx.fillStyle = "#4a2f18";
+    ctx.font = "bold 20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ร้านลุงหนวด", sx + 135, sy - 103);
+    // ลุงหนวด (NPC)
+    let nx = sx - 50, ny = sy;
+    ctx.fillStyle = "#2d6a4f"; ctx.fillRect(nx - 18, ny - 90, 36, 62);
+    ctx.fillStyle = "#4a4a4a"; ctx.fillRect(nx - 14, ny - 30, 10, 30); ctx.fillRect(nx + 4, ny - 30, 10, 30);
+    ctx.fillStyle = "#e0b48a"; ctx.beginPath(); ctx.arc(nx, ny - 110, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#eee"; // หนวดขาว
+    ctx.beginPath(); ctx.ellipse(nx, ny - 98, 15, 8, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "#111"; ctx.fillRect(nx - 8, ny - 116, 4, 5); ctx.fillRect(nx + 4, ny - 116, 4, 5);
+    ctx.fillStyle = "#8b5a2b"; // หมวกลุง
+    ctx.fillRect(nx - 22, ny - 132, 44, 10); ctx.fillRect(nx - 14, ny - 146, 28, 16);
+    // ป้ายชื่อเหนือหัว
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(nx - 50, ny - 180, 100, 24);
+    ctx.fillStyle = "#fff"; ctx.font = "16px sans-serif"; ctx.fillText("ลุงหนวด", nx, ny - 162);
+  }
+
+  // กล่องเนื้อเรื่อง: ลุงหนวดพูดกับเต้ (เปิดเรื่อง)
+  function drawStoryBox() {
+    let bx = 60, by = 20, bw = 640, bh = 120;
+    ctx.fillStyle = "rgba(20,20,35,0.8)"; ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 3; ctx.strokeRect(bx, by, bw, bh);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#ffd700"; ctx.font = "bold 20px sans-serif";
+    ctx.fillText("ลุงหนวด:", bx + 16, by + 32);
+    ctx.fillStyle = "#fff"; ctx.font = "18px sans-serif";
+    ctx.fillText("ยินดีต้อนรับสู่ทะเลสาบแสงตะวัน หนูน้อยนักตกปลา!", bx + 16, by + 60);
+    ctx.fillText("เล่ากันว่าใต้ทะเลสาบมี \"ปลาบึกยักษ์แห่งตำนาน\" ซ่อนอยู่...", bx + 16, by + 84);
+    ctx.fillText("ส่วนน้ำลึกมีสัตว์ยักษ์ ต้องซื้อเรือที่อู่บนเกาะก่อนถึงจะสู้ได้!", bx + 16, by + 106);
+  }
+
+  // ป้ายบอกระดับความยากของปลา (มุมขวาบน)
+  function drawLegend() {
+    let lx = W - 210, ly = 20;
+    ctx.fillStyle = "rgba(20,20,35,0.75)"; ctx.fillRect(lx, ly, 190, 158);
+    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 2; ctx.strokeRect(lx, ly, 190, 158);
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif";
+    ctx.fillText("ระดับความยากของปลา", lx + 12, ly + 24);
+    ctx.font = "15px sans-serif";
+    for (let lv = 1; lv <= 5; lv++) {
+      ctx.fillStyle = levelColor[lv];
+      ctx.beginPath(); ctx.arc(lx + 22, ly + 28 + lv * 24, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.fillText(levelName[lv], lx + 40, ly + 33 + lv * 24);
+    }
+  }
+
+  // ชื่อเกมมุมล่างซ้าย
+  function drawTitle() {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "bold 26px sans-serif";
+    ctx.fillText("ทะเลสาบแสงตะวัน  |  เกมตกปลาของเต้", 20, H - 16);
+    ctx.font = "16px sans-serif";
+    ctx.fillText("เดิน: A/D หรือลูกศรซ้าย-ขวา", 20, H - 46);
+  }
+
+  function draw() {
+    ctx.save();
+    ctx.translate(0, -camY); // เลื่อนกล้องลงไปส่องใต้น้ำ
+    drawSky();
+    drawWater();
+    for (let gt of giants) drawGiant(gt);
+    for (let f of fishes) drawFish(f);
+    drawRowboat();
+    drawIsland();
+    drawPier();
+    drawBoatShop();
+    ctx.save(); ctx.translate(-430, 0); drawShop(); ctx.restore(); // ย้ายร้านมาไว้บนเกาะ
+    drawPlayer();
+    ctx.restore();
+    if (camY < 60) drawStoryBox(); // เนื้อเรื่องโชว์ตอนมองผิวน้ำเท่านั้น
+    drawLegend();
+    drawTitle();
+    drawDepthReadout();
+    drawHUD();
+    if (shopOpen) drawShopPanel();
+  }
+
+  // บอกวิธีเลื่อนกล้องขึ้น-ลง (มุมซ้ายล่าง) ไม่มีข้อความบอกความลึกแล้วตามที่เต้ขอ
+  function drawDepthReadout() {
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "16px sans-serif";
+    ctx.fillText("W/S หรือ ↑/↓: เลื่อนกล้องขึ้น-ลง", 20, H - 76);
+  }
+
+  // game loop: ปลาว่ายไปมา แล้ววาดใหม่ทุกเฟรม
+  setInterval(function () {
+    t++;
+    walking = false;
+    if (!shopOpen && keys.left) { playerX -= playerSpeed; facing = -1; walking = true; }
+    if (!shopOpen && keys.right) { playerX += playerSpeed; facing = 1; walking = true; }
+    if (!shopOpen && keys.down) camY += 14;
+    if (!shopOpen && keys.up) camY -= 14;
+    camY = Math.max(0, Math.min(worldH - H, camY));
+    playerX = Math.max(pierLeft + 20, Math.min(islandRight - 20, playerX));
+    for (let gt of giants) {
+      gt.x += gt.speed * gt.dir;
+      if (gt.x > W - gt.w / 2) gt.dir = -1;
+      if (gt.x < gt.w / 2) gt.dir = 1;
+    }
+    for (let f of fishes) {
+      f.x += f.speed * f.dir;
+      if (f.x > W - 60) f.dir = -1;
+      if (f.x < 60) f.dir = 1;
+    }
+    draw();
+  }, 30);
+</script>
+</body>
+</html>

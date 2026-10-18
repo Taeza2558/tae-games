@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Tae Sports FC</title>
+<style>
+  /* ทำให้หน้าเว็บอยู่ตรงกลางจอ ดูเรียบร้อย */
+  body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    /* พื้นสีเทาอมฟ้าเข้ม เหมือนสีเบาะเก้าอี้อัฒจันทร์จริง ให้จุดสีคนดูเด่นออกมา */
+    background-color: #3d4a56;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* อัฒจันทร์ (คนดู) วาดไว้ในชั้นแยกต่างหาก แล้วทำให้ "เบลอนิดหน่อย" เหมือนกล้อง
+     ถ่ายทอดสดที่โฟกัสสนาม แต่อัฒจันทร์ด้านหลังเบลอ ๆ ดูเหมือนคนจริงเยอะ ๆ
+
+     บทเรียนที่ได้จากรอบที่แล้ว: เคยมีชั้น "เส้นแถวเก้าอี้" ซ้อนอยู่ด้วย แต่เส้นตรง ๆ
+     มันทนต่อการเบลอได้ดีกว่าจุดสีคนดูตัวเล็ก ๆ พอเบลอแล้วเลยเหลือแต่เส้นให้เห็นเด่น
+     กลบคนดูจนดูเหมือนลายแถวเก้าอี้เฉย ๆ ครูเลยตัดชั้นเส้นนั้นออก แล้วทำให้ตัวคนดู
+     ใหญ่ขึ้นแทน สีของคนดูจะได้ทนเบลอและเห็นเป็นจุดสี ๆ ชัดเจนกว่าเดิม */
+  body::before {
+    content: "";
+    position: fixed;
+    top: -10px; left: -10px; right: -10px; bottom: -10px;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cg fill='%23ff6b6b'%3E%3Ccircle cx='8' cy='9' r='4.5'/%3E%3Crect x='3.5' y='12' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%2320c997'%3E%3Ccircle cx='28' cy='7' r='4.5'/%3E%3Crect x='23.5' y='10' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23ffd93d'%3E%3Ccircle cx='48' cy='11' r='4.5'/%3E%3Crect x='43.5' y='14' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23cc5de8'%3E%3Ccircle cx='68' cy='9' r='4.5'/%3E%3Crect x='63.5' y='12' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%234dabf7'%3E%3Ccircle cx='8' cy='29' r='4.5'/%3E%3Crect x='3.5' y='32' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23ff922b'%3E%3Ccircle cx='28' cy='31' r='4.5'/%3E%3Crect x='23.5' y='34' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%2369db7c'%3E%3Ccircle cx='48' cy='27' r='4.5'/%3E%3Crect x='43.5' y='30' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23f06595'%3E%3Ccircle cx='68' cy='29' r='4.5'/%3E%3Crect x='63.5' y='32' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23cc5de8'%3E%3Ccircle cx='8' cy='49' r='4.5'/%3E%3Crect x='3.5' y='52' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23ffd93d'%3E%3Ccircle cx='28' cy='47' r='4.5'/%3E%3Crect x='23.5' y='50' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%2320c997'%3E%3Ccircle cx='48' cy='51' r='4.5'/%3E%3Crect x='43.5' y='54' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23ff6b6b'%3E%3Ccircle cx='68' cy='49' r='4.5'/%3E%3Crect x='63.5' y='52' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%2369db7c'%3E%3Ccircle cx='8' cy='69' r='4.5'/%3E%3Crect x='3.5' y='72' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23f06595'%3E%3Ccircle cx='28' cy='71' r='4.5'/%3E%3Crect x='23.5' y='74' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%23ff922b'%3E%3Ccircle cx='48' cy='67' r='4.5'/%3E%3Crect x='43.5' y='70' width='9' height='10' rx='3'/%3E%3C/g%3E%3Cg fill='%234dabf7'%3E%3Ccircle cx='68' cy='69' r='4.5'/%3E%3Crect x='63.5' y='72' width='9' height='10' rx='3'/%3E%3C/g%3E%3C/svg%3E"),
+      linear-gradient(180deg, rgba(10, 10, 20, 0.35) 0%, rgba(10, 10, 20, 0.1) 40%, rgba(10, 10, 20, 0) 70%);
+    background-size: 55px 55px, 100% 100%;
+    background-repeat: repeat, no-repeat;
+    filter: blur(2px);
+    z-index: -1;
+  }
+
+  /* กรอบไม้รอบสนาม เหมือนขอบสนามกีฬาจริง */
+  canvas {
+    display: block;
+    border: 12px solid #4a3728;
+    border-radius: 6px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  }
+
+  /* สนามกีฬาแห่งชาติทรงรี มองจากด้านบน ตามรูปที่เต้ส่งมา:
+     ขอบฟ้าอ่อน -> อัฒจันทร์เทา (มีลายขั้นบันไดจาง ๆ) -> ลู่วิ่งแดง-ขาว -> สนามหญ้า
+     ทุกชั้นใช้ display: inline-block เพื่อห่อขนาดตามของข้างในพอดี
+     ใช้ border-radius ตัวเลขใหญ่มาก ๆ (999px) เบราว์เซอร์จะปัดให้กลายเป็นทรงรีเองอัตโนมัติ */
+  .track-blue, .track-gray, .track-red, .track-white {
+    display: inline-block;
+    border-radius: 999px;
+  }
+  .track-blue {
+    background: linear-gradient(135deg, #bfe4f0, #8fcbe3);
+    padding: 14px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    /* ย่อ/ขยายทั้งสนาม (รวมทุกวงแหวนรอบนอกด้วย) ทั้งชุด โดยไม่ไปยุ่งกับตัวเกมข้างในเลย */
+    transform: scale(1.1);
+  }
+  .track-gray {
+    background:
+      repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1) 0px, rgba(0, 0, 0, 0.1) 2px, transparent 2px, transparent 16px),
+      linear-gradient(135deg, #aab0b6, #888e94);
+    padding: 34px;
+  }
+  .track-red {
+    background: linear-gradient(135deg, #c0503a, #a53f2b);
+  }
+  .track-white {
+    background: #f2ece0;
+  }
+  .track-outer {
+    padding: 60px;
+  }
+  .track-lane1 {
+    padding: 10px;
+  }
+  .track-inner {
+    padding: 60px;
+  }
+  .track-lane2 {
+    padding: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- สนามกีฬาทรงรี: ขอบฟ้า > อัฒจันทร์เทา > ลู่วิ่งแดง-ขาว > สนาม (canvas) อยู่ในสุด -->
+<div class="track-blue">
+  <div class="track-gray">
+    <div class="track-red track-outer">
+      <div class="track-white track-lane1">
+        <div class="track-red track-inner">
+          <div class="track-white track-lane2">
+            <!-- canvas คือ "ผ้าใบ" ที่เราจะวาดรูปทุกอย่างของเกมลงไป -->
+            <canvas id="game" width="560" height="350"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ดึง canvas มาใช้งาน และขอ "พู่กัน" (ctx) สำหรับวาดรูป
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // ตำแหน่งที่นักเตะของเต้เกิด อยู่หน้าประตูของตัวเอง (ฝั่งซ้าย ฝั่งที่ฝ่ายตรงข้ามยิงเข้า)
+  let playerSpawnX = 100;
+  let playerSpawnY = canvas.height / 2;
+
+  // ตำแหน่งที่ฝ่ายตรงข้ามเกิด อยู่หน้าประตูของตัวเอง (ฝั่งขวา)
+  let oppSpawnX = canvas.width - 100;
+  let oppSpawnY = canvas.height / 2;
+
+  // ตัวแปร x, y คือ "กล่องเก็บตัวเลข" ที่จำตำแหน่งนักเตะของเต้ไว้
+  let x = playerSpawnX;
+  let y = playerSpawnY;
+
+  // speed คือความเร็วเดินของเต้ต่อการขยับหนึ่งครั้ง (เท่ากับ oppSpeed ของฝ่ายตรงข้ามพอดี)
+  // เต้ลองเปลี่ยนตัวเลขนี้ดูได้ว่าจะเดินเร็วขึ้นไหม
+  let speed = 2.5;
+
+  // moveUp/Down/Left/Right คือ boolean บอกว่าตอนนี้กำลังกดปุ่มทิศทางนั้นค้างอยู่ไหม
+  // เต้กดค้างไว้ นักเตะจะเดินต่อเนื่องเหมือนฝ่ายตรงข้ามเลย
+  let moveUp = false;
+  let moveDown = false;
+  let moveLeft = false;
+  let moveRight = false;
+
+  // สีเสื้อของนักเตะเต้
+  let jerseyColor = "red";
+
+  // legFrame คือกล่องสลับระหว่าง 0 กับ 1 เพื่อทำให้ขาดูขยับตอนวิ่ง
+  let legFrame = 0;
+  let stepCounter = 0; // ใช้นับจังหวะเพื่อสลับท่าขาของเต้
+
+  // ===== สกิลของผู้เล่น =====
+  // สกิล 1: วิ่งเร็ว (Sprint) กดปุ่ม Space
+  let sprintActive = false;      // ตอนนี้กำลังวิ่งเร็วอยู่ไหม
+  let sprintTimer = 0;           // สกิลจะทำงานอีกกี่ติ๊ก
+  let sprintCooldownTimer = 0;   // ต้องรออีกกี่ติ๊กถึงจะใช้สกิลได้อีกครั้ง
+
+  // สกิล 2: โล่ป้องกัน (Shield) กดปุ่ม Shift
+  let shieldActive = false;
+  let shieldTimer = 0;
+  let shieldCooldownTimer = 0;
+
+  // สกิล 3: เลี้ยงบอลหลบเก่ง (Dribble) กดปุ่ม Q
+  // ตอนใช้สกิลนี้ ฝ่ายตรงข้ามต้องเข้ามาใกล้มาก ๆ ถึงจะแย่งบอลได้ (ไม่ได้กันได้เลยเหมือนโล่)
+  let dribbleActive = false;
+  let dribbleTimer = 0;
+  let dribbleCooldownTimer = 0;
+
+  // score คือกล่องเก็บ "คะแนน" ของเต้ เริ่มต้นที่ 0
+  let score = 0;
+
+  // computerScore คือคะแนนของฝ่ายตรงข้าม เริ่มต้นที่ 0 เหมือนกัน
+  let computerScore = 0;
+
+  // ตำแหน่งลูกบอล เดี๋ยวเราจะวางไว้ตรงกลางสนามตอนเริ่มเกม
+  let ballX, ballY;
+
+  // ความเร็วของบอลตอนลอยอยู่กลางอากาศ (แกน x และแกน y)
+  let ballVX = 0;
+  let ballVY = 0;
+
+  // ballMoving คือ boolean บอกว่าตอนนี้บอลกำลังลอยอยู่หรือเปล่า
+  let ballMoving = false;
+
+  // ballRotation คือมุมหมุนของลูกบอล ให้บอลหมุนตอนลอยอยู่กลางอากาศ
+  let ballRotation = 0;
+
+  // celebrateTimer คือเวลาที่นักเตะของเต้กำลังทำท่าฉลอง (หลังยิงประตูได้)
+  let celebrateTimer = 0;
+
+  // ทิศทางที่นักเตะหันหน้าล่าสุด ใช้ตอนเตะบอล (เริ่มต้นหันขวา)
+  let lastDirX = 1;
+  let lastDirY = 0;
+
+  // hasBall คือกล่องแบบ boolean เก็บว่านักเตะมีบอลติดขาอยู่หรือเปล่า
+  // เริ่มต้นเป็น false (เท็จ) เพราะยังไม่มีบอล
+  let hasBall = false;
+
+  // timeLeft คือเวลาที่เหลือ (วินาที) เต้ลองเปลี่ยนตัวเลขนี้ได้ถ้าอยากได้เวลามากขึ้นหรือน้อยลง
+  let timeLeft = 30;
+
+  // state คือกล่องเก็บว่าตอนนี้เกมอยู่ช่วงไหน มีได้ 3 ค่า:
+  // "title" = หน้าจอชื่อเกม, "playing" = กำลังเล่น, "over" = จบเกมแล้ว
+  let state = "title";
+
+  // ชื่อเกมของเต้
+  let gameTitle = "Tae Sports FC";
+
+  // ตำแหน่งและขนาดของประตูฝั่งขวา
+  let goal = { x: canvas.width - 30, y: canvas.height / 2 - 60, width: 20, height: 120 };
+
+  // ตำแหน่งและขนาดของประตูฝั่งซ้าย (อีกประตูหนึ่ง)
+  let leftGoal = { x: 10, y: canvas.height / 2 - 60, width: 20, height: 120 };
+
+  // ฟังก์ชันนี้เช็คว่าตำแหน่ง (px, py) อยู่ในประตูฝั่งขวาหรือเปล่า (ประตูของฝ่ายตรงข้าม เต้ยิงเข้าฝั่งนี้ได้แต้ม)
+  function isInRightGoal(px, py) {
+    return px > goal.x && py > goal.y && py < goal.y + goal.height;
+  }
+
+  // ฟังก์ชันนี้เช็คว่าตำแหน่ง (px, py) อยู่ในประตูฝั่งซ้ายหรือเปล่า (ประตูของเต้เอง ถ้าเต้ยิงเข้าฝั่งนี้ถือว่ายิงเข้าประตูตัวเอง)
+  function isInLeftGoal(px, py) {
+    return px < leftGoal.x + leftGoal.width && py > leftGoal.y && py < leftGoal.y + leftGoal.height;
+  }
+
+  // ตำแหน่งนักเตะฝ่ายตรงข้าม เกิดหน้าประตูของตัวเอง (ฝั่งขวา) คอยวิ่งไล่แย่งบอล
+  let oppX = oppSpawnX;
+  let oppY = oppSpawnY;
+  let oppSpeed = 2.5; // ความเร็วของฝ่ายตรงข้าม
+
+  // สีเสื้อของฝ่ายตรงข้าม และ ตัวสลับท่าขาตอนวิ่ง
+  let oppJerseyColor = "black";
+  let oppLegFrame = 0;
+  let oppStepCounter = 0; // ใช้นับจังหวะเพื่อสลับท่าขาของฝ่ายตรงข้าม
+
+  // oppHasBall คือ boolean บอกว่าฝ่ายตรงข้ามมีบอลติดขาอยู่หรือเปล่า
+  let oppHasBall = false;
+
+  // stealImmuneTimer คือเวลาที่ฝ่ายตรงข้ามแย่งบอลจากเต้ไม่ได้ (หลังจากเต้เพิ่งแย่งคืนมาด้วยปุ่ม E)
+  let stealImmuneTimer = 0;
+
+  // oppStealImmuneTimer คือเวลาที่เต้แย่งบอลคืนไม่ได้ (หลังจากฝ่ายตรงข้ามเพิ่งแย่งบอลไปจากเต้)
+  let oppStealImmuneTimer = 0;
+
+  // ฟังก์ชันนี้ทำให้ฝ่ายตรงข้ามฉลาดขึ้น: ถ้าเต้มีบอล มันจะไล่แย่ง
+  // ถ้ามันมีบอลติดขาเองแล้ว มันจะวิ่งไปยิงประตูที่ใกล้ที่สุด
+  // ถ้าไม่มีใครมีบอล มันจะวิ่งไปแย่งบอลลอยก่อนเต้
+  function moveOpponent() {
+    let targetX, targetY;
+
+    if (hasBall) {
+      targetX = x;
+      targetY = y;
+    } else if (oppHasBall) {
+      // ฝ่ายตรงข้ามยิงได้แค่ประตูฝั่งซ้ายเท่านั้น เลยวิ่งพาบอลไปทางนั้นเสมอ
+      targetX = leftGoal.x + leftGoal.width / 2;
+      targetY = leftGoal.y + leftGoal.height / 2;
+    } else {
+      targetX = ballX;
+      targetY = ballY;
+    }
+
+    // คำนวณทิศทางจากฝ่ายตรงข้ามไปยังเป้าหมาย แล้ววิ่งเข้าหาทีละนิด
+    let dx = targetX - oppX;
+    let dy = targetY - oppY;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance > 1) {
+      oppX += (dx / distance) * oppSpeed;
+      oppY += (dy / distance) * oppSpeed;
+    }
+
+    // ถ้ายังไม่มีใครมีบอลอยู่ เช็คว่าฝ่ายตรงข้ามเดินไปใกล้บอลลอยหรือยัง
+    if (!hasBall && !oppHasBall && !ballMoving) {
+      let bdx = oppX - ballX;
+      let bdy = oppY - ballY;
+      let bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+      if (bdist < 40) {
+        oppHasBall = true; // แย่งบอลลอยได้แล้ว
+      }
+    }
+
+    // ถ้าฝ่ายตรงข้ามพาบอลเข้าประตูฝั่งซ้ายได้ (ยิงได้แค่ฝั่งนี้เท่านั้น) คอมพิวเตอร์ได้คะแนน
+    if (oppHasBall && isInLeftGoal(oppX, oppY)) {
+      computerScore = computerScore + 1;
+      oppHasBall = false;
+      oppX = oppSpawnX;
+      oppY = oppSpawnY;
+      moveBallToCenter();
+    }
+
+    // นับจังหวะแล้วสลับท่าขา ให้ดูเหมือนกำลังวิ่งอยู่ตลอดเวลา
+    oppStepCounter++;
+    if (oppStepCounter >= 5) {
+      oppLegFrame = oppLegFrame === 0 ? 1 : 0;
+      oppStepCounter = 0;
+    }
+  }
+
+  // ฟังก์ชันนี้ ย้ายลูกบอลกลับไปอยู่ตรงกลางสนามเสมอ
+  function moveBallToCenter() {
+    ballX = canvas.width / 2;
+    ballY = canvas.height / 2;
+    ballVX = 0;
+    ballVY = 0;
+    ballMoving = false;
+    ballRotation = 0;
+  }
+
+  // ฟังก์ชันนี้ ตั้งค่าทุกอย่างกลับไปเริ่มต้นใหม่ ตอนกดปุ่มเล่นใหม่
+  function resetGame() {
+    score = 0;
+    computerScore = 0;
+    timeLeft = 30;
+    hasBall = false;
+    oppHasBall = false;
+    stealImmuneTimer = 0;
+    oppStealImmuneTimer = 0;
+    celebrateTimer = 0;
+    x = playerSpawnX;
+    y = playerSpawnY;
+    oppX = oppSpawnX;
+    oppY = oppSpawnY;
+    oppLegFrame = 0;
+    oppStepCounter = 0;
+    legFrame = 0;
+    stepCounter = 0;
+    moveUp = false;
+    moveDown = false;
+    moveLeft = false;
+    moveRight = false;
+    moveBallToCenter();
+
+    // รีเซ็ตสกิลทั้งหมดกลับไปพร้อมใช้
+    sprintActive = false;
+    sprintTimer = 0;
+    sprintCooldownTimer = 0;
+    shieldActive = false;
+    shieldTimer = 0;
+    shieldCooldownTimer = 0;
+    dribbleActive = false;
+    dribbleTimer = 0;
+    dribbleCooldownTimer = 0;
+
+    // รีเซ็ตทิศทางและความเร็วบอลด้วย
+    lastDirX = 1;
+    lastDirY = 0;
+  }
+
+  // ฟังก์ชันนี้วาดคนจริง ๆ (เงา ขา รองเท้า ลำตัว แขน หัว ผม หน้าตา เบอร์เสื้อ) ใช้ได้ทั้งนักเตะของเต้และฝ่ายตรงข้าม
+  // แค่ใส่สีเสื้อ (shirtColor) ท่าขา (legFrame) และเบอร์เสื้อ (number) ที่ต่างกันเข้าไป
+  function drawPerson(px, py, shirtColor, legFrame, number) {
+    // เงาใต้ตัว ให้ดูมีมิติ ไม่เหมือนลอยอยู่กลางอากาศ
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(px, py + 33, 18, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // คำนวณตำแหน่งปลายขาแต่ละข้าง สลับท่าตาม legFrame (เหมือนสลับรูป 2 รูปให้ดูเคลื่อนไหว)
+    let legAX, legAY, legBX, legBY;
+    if (legFrame === 0) {
+      legAX = px - 18; legAY = py + 30;
+      legBX = px + 15; legBY = py + 30;
+    } else {
+      legAX = px - 15; legAY = py + 30;
+      legBX = px + 22; legBY = py + 30;
+    }
+
+    // ขา
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(px - 8, py + 5);
+    ctx.lineTo(legAX, legAY);
+    ctx.moveTo(px + 8, py + 5);
+    ctx.lineTo(legBX, legBY);
+    ctx.stroke();
+
+    // รองเท้า ที่ปลายขาแต่ละข้าง
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.ellipse(legAX, legAY, 6, 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(legBX, legBY, 6, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ลำตัว (เสื้อ)
+    ctx.fillStyle = shirtColor;
+    ctx.fillRect(px - 15, py - 30, 30, 35);
+
+    // ไล่เฉดแสงเงาทับบนเสื้อ ให้ดูมีมิติขึ้น (สว่างด้านบน มืดด้านล่าง)
+    let shirtShade = ctx.createLinearGradient(0, py - 30, 0, py + 5);
+    shirtShade.addColorStop(0, "rgba(255, 255, 255, 0.3)");
+    shirtShade.addColorStop(1, "rgba(0, 0, 0, 0.25)");
+    ctx.fillStyle = shirtShade;
+    ctx.fillRect(px - 15, py - 30, 30, 35);
+
+    // เบอร์เสื้อ ตรงกลางลำตัว
+    ctx.fillStyle = "white";
+    ctx.font = "bold 16px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(number), px, py - 12);
+
+    // แขน
+    ctx.strokeStyle = "#f1c27d";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(px - 15, py - 25);
+    ctx.lineTo(px - 25, py);
+    ctx.moveTo(px + 15, py - 25);
+    ctx.lineTo(px + 25, py);
+    ctx.stroke();
+
+    // หัว
+    ctx.fillStyle = "#f1c27d";
+    ctx.beginPath();
+    ctx.arc(px, py - 45, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ตา
+    ctx.fillStyle = "#222";
+    ctx.beginPath();
+    ctx.arc(px - 5, py - 46, 2, 0, Math.PI * 2);
+    ctx.arc(px + 5, py - 46, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ผม (ครึ่งบนของหัว)
+    ctx.fillStyle = "#3b2a1a";
+    ctx.beginPath();
+    ctx.arc(px, py - 45, 15, Math.PI, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // ฟังก์ชันนี้วาดลายตาข่ายเป็นเส้นตาราง ไว้ในกรอบประตู
+  function drawGoalNet(gx, gy, gw, gh) {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.lineWidth = 1;
+    let spacing = 6;
+    for (let nx = gx; nx <= gx + gw; nx += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(nx, gy);
+      ctx.lineTo(nx, gy + gh);
+      ctx.stroke();
+    }
+    for (let ny = gy; ny <= gy + gh; ny += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(gx, ny);
+      ctx.lineTo(gx + gw, ny);
+      ctx.stroke();
+    }
+  }
+
+  // ฟังก์ชันนี้วาดแสงไฟสปอตไลท์สนามที่มุมทั้งสี่ ให้ดูเหมือนสนามกีฬาตอนกลางคืน
+  function drawFloodlights() {
+    let corners = [
+      { x: 0, y: 0 },
+      { x: canvas.width, y: 0 },
+      { x: 0, y: canvas.height },
+      { x: canvas.width, y: canvas.height }
+    ];
+    for (let i = 0; i < corners.length; i++) {
+      let c = corners[i];
+      let glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 220);
+      glow.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+      glow.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // ฟังก์ชันนี้วาดสี่เหลี่ยมมุมโค้ง ใช้ช่วยวาดพื้นสกอร์บอร์ด
+  function drawRoundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  }
+
+  // ฟังก์ชันนี้วาดรูปห้าเหลี่ยม ใช้ช่วยวาดลายลูกฟุตบอล
+  function drawPentagon(cx, cy, radius, rotation) {
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      let angle = rotation + i * ((2 * Math.PI) / 5);
+      let px = cx + radius * Math.cos(angle);
+      let py = cy + radius * Math.sin(angle);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ฟังก์ชันนี้วาดลูกฟุตบอลจริง ๆ (วงกลมขาว + ลายห้าเหลี่ยมดำ) แทนอิโมจิ
+  // rotation คือมุมหมุนของลูกบอล ใช้ตอนบอลลอยอยู่กลางอากาศ จะได้ดูเหมือนบอลกำลังหมุน
+  function drawBall(px, py, rotation) {
+    let r = 22;
+
+    // ใช้ translate + rotate เพื่อหมุนลายบอลรอบจุดศูนย์กลางของมันเอง
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rotation);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = "white";
+    ctx.fill();
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = "black";
+    drawPentagon(0, 0, r * 0.4, -Math.PI / 2);
+
+    for (let i = 0; i < 5; i++) {
+      let angle = -Math.PI / 2 + i * ((2 * Math.PI) / 5) + Math.PI / 5;
+      let cx = Math.cos(angle) * r * 0.65;
+      let cy = Math.sin(angle) * r * 0.65;
+      drawPentagon(cx, cy, r * 0.28, angle);
+    }
+
+    ctx.restore();
+  }
+
+  // ฟังก์ชันนี้วาดนักเตะของเต้ตอนกำลังทำท่าฉลอง (ชูแขนขึ้น กระโดดเด้ง ๆ)
+  function drawCelebration(px, py, shirtColor) {
+    let bounce = Math.abs(Math.sin(celebrateTimer * 0.5)) * 10;
+    let cy = py - bounce;
+
+    // เงาใต้ตัว
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(px, py + 33, 18, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ขา
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(px - 8, cy + 5);
+    ctx.lineTo(px - 10, cy + 30);
+    ctx.moveTo(px + 8, cy + 5);
+    ctx.lineTo(px + 10, cy + 30);
+    ctx.stroke();
+
+    // ลำตัว
+    ctx.fillStyle = shirtColor;
+    ctx.fillRect(px - 15, cy - 30, 30, 35);
+
+    // ไล่เฉดแสงเงาทับบนเสื้อ ให้ดูมีมิติขึ้น
+    let celebShade = ctx.createLinearGradient(0, cy - 30, 0, cy + 5);
+    celebShade.addColorStop(0, "rgba(255, 255, 255, 0.3)");
+    celebShade.addColorStop(1, "rgba(0, 0, 0, 0.25)");
+    ctx.fillStyle = celebShade;
+    ctx.fillRect(px - 15, cy - 30, 30, 35);
+
+    // แขนชูขึ้นฟ้า ท่าฉลอง
+    ctx.strokeStyle = "#f1c27d";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(px - 15, cy - 25);
+    ctx.lineTo(px - 30, cy - 50);
+    ctx.moveTo(px + 15, cy - 25);
+    ctx.lineTo(px + 30, cy - 50);
+    ctx.stroke();
+
+    // หัว
+    ctx.fillStyle = "#f1c27d";
+    ctx.beginPath();
+    ctx.arc(px, cy - 45, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ตา
+    ctx.fillStyle = "#222";
+    ctx.beginPath();
+    ctx.arc(px - 5, cy - 46, 2, 0, Math.PI * 2);
+    ctx.arc(px + 5, cy - 46, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ผม
+    ctx.fillStyle = "#3b2a1a";
+    ctx.beginPath();
+    ctx.arc(px, cy - 45, 15, Math.PI, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // ฟังก์ชันวาดภาพทั้งหมด: สนาม + ประตู + ลูกบอล + นักเตะ + คะแนน
+  function draw() {
+    // วาดพื้นสนามเป็นแถบสีเขียวเข้ม-อ่อนสลับกัน เหมือนรอยตัดหญ้าสนามจริง
+    let stripeWidth = 50;
+    for (let sx = 0; sx < canvas.width; sx += stripeWidth) {
+      let stripeIndex = Math.floor(sx / stripeWidth);
+      ctx.fillStyle = stripeIndex % 2 === 0 ? "#3aa63a" : "#2e8b2e";
+      ctx.fillRect(sx, 0, stripeWidth, canvas.height);
+    }
+
+    // วาดแสงไฟสปอตไลท์สนาม เหมือนสนามกีฬาตอนกลางคืน
+    drawFloodlights();
+
+    // วาดแสงเงาไล่สีให้พื้นสนามดูมีมิติ (มืดลงนิดหน่อยตรงขอบจอ)
+    let vignette = ctx.createRadialGradient(
+      canvas.width / 2, canvas.height / 2, canvas.height / 3,
+      canvas.width / 2, canvas.height / 2, canvas.height
+    );
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.35)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // วาดเส้นขาวของสนาม ให้เหมือนสนามฟุตบอลจริง
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 4;
+
+    // เส้นขอบสนาม
+    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+    // เส้นแบ่งกลางสนาม
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 10);
+    ctx.lineTo(canvas.width / 2, canvas.height - 10);
+    ctx.stroke();
+
+    // วงกลมกลางสนาม
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 60, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // จุดกึ่งกลางสนาม
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // เส้นโค้งมุมสนามทั้ง 4 มุม
+    let cornerR = 15;
+    ctx.beginPath();
+    ctx.arc(10, 10, cornerR, 0, Math.PI / 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(canvas.width - 10, 10, cornerR, Math.PI / 2, Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(10, canvas.height - 10, cornerR, -Math.PI / 2, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(canvas.width - 10, canvas.height - 10, cornerR, Math.PI, Math.PI * 1.5);
+    ctx.stroke();
+
+    // ถ้ายังอยู่หน้าจอชื่อเกม วาดแค่หน้าจอนี้ แล้วจบฟังก์ชันเลย ไม่ต้องวาดสนาม
+    if (state === "title") {
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "60px sans-serif";
+      ctx.fillText(gameTitle, canvas.width / 2, canvas.height / 2 - 40);
+
+      ctx.font = "30px sans-serif";
+      ctx.fillText("กดปุ่ม Enter เพื่อเริ่มเล่น", canvas.width / 2, canvas.height / 2 + 40);
+      return;
+    }
+
+    // วาดกรอบเขตประตู (penalty box) รอบ ๆ ประตูฝั่งขวา
+    ctx.strokeRect(canvas.width - 160, canvas.height / 2 - 100, 150, 200);
+
+    // วาดกรอบเขตประตู (penalty box) รอบ ๆ ประตูฝั่งซ้าย
+    ctx.strokeRect(10, canvas.height / 2 - 100, 150, 200);
+
+    // วาดตาข่ายในกรอบประตู ทั้งสองฝั่ง (วาดก่อน จะได้อยู่ใต้กรอบขาว)
+    drawGoalNet(goal.x, goal.y, goal.width, goal.height);
+    drawGoalNet(leftGoal.x, leftGoal.y, leftGoal.width, leftGoal.height);
+
+    // วาดประตู เป็นกรอบสีขาว ทั้งสองฝั่ง
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(goal.x, goal.y, goal.width, goal.height);
+    ctx.strokeRect(leftGoal.x, leftGoal.y, leftGoal.width, leftGoal.height);
+
+    // ถ้านักเตะมีบอลติดขาอยู่ ให้บอลอยู่ข้างหน้านักเตะ ตามทิศที่หันหน้าอยู่
+    // แล้วให้บอลส่ายซ้าย-ขวาเบา ๆ ตามจังหวะขาที่ก้าวเดิน (legFrame) เหมือนกำลังเลี้ยงบอลจริง ๆ
+    // ถ้าฝ่ายตรงข้ามมีบอล ให้บอลอยู่ติดกับตัวฝ่ายตรงข้ามแทน
+    if (hasBall) {
+      let perpX = -lastDirY; // ทิศตั้งฉากกับทิศที่วิ่ง ใช้ทำให้บอลส่ายไปด้านข้าง
+      let perpY = lastDirX;
+      let sway = legFrame === 0 ? -10 : 10;
+      ballX = x + lastDirX * 45 + perpX * sway;
+      ballY = y + lastDirY * 45 + perpY * sway;
+    } else if (oppHasBall) {
+      ballX = oppX;
+      ballY = oppY;
+    }
+
+    // ถ้าบอลลอยเร็วมาก ๆ วาดรอยเบลอตามหลังบอล ให้ดูเหมือนพุ่งเร็ว
+    if (ballMoving) {
+      let ballSpeedNow = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+      if (ballSpeedNow > 3) {
+        for (let i = 1; i <= 3; i++) {
+          let tx = ballX - (ballVX / ballSpeedNow) * (10 * i);
+          let ty = ballY - (ballVY / ballSpeedNow) * (10 * i);
+          ctx.beginPath();
+          ctx.arc(tx, ty, 20 - i * 4, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255, 255, 255, " + (0.18 - i * 0.04) + ")";
+          ctx.fill();
+        }
+      }
+    }
+
+    // เงาใต้ลูกบอล ให้ดูเหมือนบอลลอยอยู่เหนือพื้นหญ้าจริง ๆ
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(ballX, ballY + 20, 14, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // วาดลูกบอล (ลูกฟุตบอลจริง ๆ ที่วาดเอง แทนอิโมจิ)
+    drawBall(ballX, ballY, ballRotation);
+
+    // วาดนักเตะฝ่ายตรงข้าม เป็นรูปคนจริง ๆ เหมือนกัน แต่ใส่เสื้อสีดำ
+    drawPerson(oppX, oppY, oppJerseyColor, oppLegFrame, 9);
+
+    // ถ้ากำลังใช้สกิลโล่ป้องกันอยู่ วาดวงกลมฟ้า ๆ รอบตัวนักเตะให้เห็นชัด
+    if (shieldActive) {
+      ctx.strokeStyle = "cyan";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(x, y - 15, 50, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ถ้ากำลังใช้สกิลเลี้ยงบอลหลบเก่งอยู่ วาดวงกลมเขียวเส้นประรอบตัวนักเตะ
+    if (dribbleActive) {
+      ctx.strokeStyle = "#00ff00";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.arc(x, y - 15, 40, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // ถ้ากำลังใช้สกิลวิ่งเร็วอยู่ วาดเส้นความเร็วพุ่งตามหลังนักเตะ ให้ดูเหมือนวิ่งเร็วมาก ๆ
+    if (sprintActive) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+      ctx.lineWidth = 3;
+      for (let i = 1; i <= 3; i++) {
+        let tx = x - lastDirX * (14 * i);
+        let ty = y - lastDirY * (14 * i);
+        ctx.beginPath();
+        ctx.moveTo(tx - lastDirY * 8, ty + lastDirX * 8);
+        ctx.lineTo(tx + lastDirY * 8, ty - lastDirX * 8);
+        ctx.stroke();
+      }
+    }
+
+    // วาดนักเตะของเต้ เป็นรูปคนจริง ๆ ตรงตำแหน่งในกล่อง x, y
+    if (celebrateTimer > 0) {
+      drawCelebration(x, y, jerseyColor);
+    } else {
+      drawPerson(x, y, jerseyColor, legFrame, 10);
+    }
+
+    // ===== สกอร์บอร์ดแบบใหม่ อยู่กึ่งกลางด้านบน เหมือนสกอร์บอร์ดถ่ายทอดสดจริง =====
+    let sbW = 320;
+    let sbH = 50;
+    let sbX = canvas.width / 2 - sbW / 2;
+    let sbY = 15;
+
+    // พื้นสกอร์บอร์ด สีดำโปร่งแสง มุมโค้ง
+    drawRoundRect(sbX, sbY, sbW, sbH, 10);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fill();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    drawRoundRect(sbX, sbY, sbW, sbH, 10);
+    ctx.stroke();
+
+    // สี่เหลี่ยมสีทีมเต้ (ซ้าย) และสีทีมฝ่ายตรงข้าม (ขวา)
+    ctx.fillStyle = jerseyColor;
+    ctx.fillRect(sbX + 12, sbY + 15, 20, 20);
+    ctx.fillStyle = oppJerseyColor;
+    ctx.fillRect(sbX + sbW - 32, sbY + 15, 20, 20);
+
+    // ตัวเลขคะแนน อยู่กึ่งกลางสกอร์บอร์ด
+    ctx.fillStyle = "white";
+    ctx.font = "bold 26px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(score + "  -  " + computerScore, canvas.width / 2, sbY + sbH / 2);
+
+    // เวลาที่เหลือ อยู่ใต้สกอร์บอร์ด
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillStyle = "#ffdd55";
+    ctx.fillText("เวลา " + timeLeft, canvas.width / 2, sbY + sbH + 18);
+
+    // สถานะสกิลทั้งหมด ย้ายไปไว้มุมซ้ายล่างแทน ไม่ให้บังสกอร์บอร์ด
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "18px sans-serif";
+    let sprintText = sprintCooldownTimer > 0 ? Math.ceil(sprintCooldownTimer / 33) + " วิ" : "พร้อม!";
+    let shieldText = shieldCooldownTimer > 0 ? Math.ceil(shieldCooldownTimer / 33) + " วิ" : "พร้อม!";
+    let dribbleText = dribbleCooldownTimer > 0 ? Math.ceil(dribbleCooldownTimer / 33) + " วิ" : "พร้อม!";
+    let skillY = canvas.height - 132;
+    ctx.fillText("Space วิ่งเร็ว: " + sprintText, 20, skillY);
+    ctx.fillText("Shift โล่ป้องกัน: " + shieldText, 20, skillY + 22);
+    ctx.fillText("Q เลี้ยงบอลหลบ: " + dribbleText, 20, skillY + 44);
+    ctx.fillText("F เตะบอล", 20, skillY + 66);
+    ctx.fillText("E แย่งบอลคืน", 20, skillY + 88);
+
+    // หน้าจอฉลองพิเศษ ตอนยิงประตูได้ ขึ้นข้อความ "GOAL!" ใหญ่ ๆ กลางจอ พร้อมเด้งเล็กน้อย
+    if (celebrateTimer > 0) {
+      let goalScale = 1 + Math.sin(celebrateTimer * 0.3) * 0.15;
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(goalScale, goalScale);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 70px sans-serif";
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 5;
+      ctx.strokeText("GOAL!", 0, 0);
+      ctx.fillStyle = "yellow";
+      ctx.fillText("GOAL!", 0, 0);
+      ctx.restore();
+    }
+
+    // ถ้าเกมจบแล้ว วาดฉากจบเกมทับด้านบนสุด
+    if (state === "over") {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "white";
+      ctx.font = "55px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("หมดเวลา!", canvas.width / 2, canvas.height / 2 - 90);
+
+      ctx.font = "35px sans-serif";
+      ctx.fillText("เต้: " + score + "   ศัตรู: " + computerScore, canvas.width / 2, canvas.height / 2 - 20);
+
+      let resultText = score > computerScore ? "เต้ชนะ!" : score < computerScore ? "ศัตรูชนะ!" : "เสมอกัน!";
+      ctx.font = "40px sans-serif";
+      ctx.fillText(resultText, canvas.width / 2, canvas.height / 2 + 35);
+
+      ctx.font = "25px sans-serif";
+      ctx.fillText("กดปุ่ม R เพื่อเล่นใหม่", canvas.width / 2, canvas.height / 2 + 90);
+    }
+  }
+
+  // ทุกครั้งที่เต้กดปุ่มบนคีย์บอร์ด โค้ดตรงนี้จะทำงาน
+  document.addEventListener("keydown", function (e) {
+    // ถ้ายังอยู่หน้าจอชื่อเกม รอกด Enter เพื่อเริ่มเล่น
+    if (state === "title") {
+      if (e.key === "Enter") {
+        state = "playing";
+        draw();
+      }
+      return;
+    }
+
+    // ถ้าเกมจบแล้ว รอกด R เพื่อเล่นใหม่
+    if (state === "over") {
+      if (e.key.toLowerCase() === "r") {
+        resetGame();
+        state = "playing";
+        draw();
+      }
+      return;
+    }
+
+    let key = e.key.toLowerCase();
+
+    // กดปุ่มทิศทางค้างไว้ นักเตะจะเดินต่อเนื่อง (ไปขยับจริงในลูปเกมด้านล่าง)
+    if (e.key === "ArrowRight" || key === "d") moveRight = true;
+    if (e.key === "ArrowLeft" || key === "a") moveLeft = true;
+    if (e.key === "ArrowUp" || key === "w") moveUp = true;
+    if (e.key === "ArrowDown" || key === "s") moveDown = true;
+
+    // กด Space ใช้สกิลวิ่งเร็ว (ถ้าไม่ติดคูลดาวน์)
+    if (e.key === " ") {
+      e.preventDefault(); // กันไม่ให้หน้าจอเลื่อนตอนกด space
+      if (sprintCooldownTimer <= 0) {
+        sprintActive = true;
+        sprintTimer = 100;        // วิ่งเร็วได้ประมาณ 3 วินาที
+        sprintCooldownTimer = 200; // ต้องรอประมาณ 6 วินาทีถึงจะใช้ได้อีก
+      }
+    }
+
+    // กด Shift ใช้สกิลโล่ป้องกัน (ถ้าไม่ติดคูลดาวน์)
+    if (e.key === "Shift" && shieldCooldownTimer <= 0) {
+      shieldActive = true;
+      shieldTimer = 100;
+      shieldCooldownTimer = 200;
+    }
+
+    // กด Q ใช้สกิลเลี้ยงบอลหลบเก่ง (ถ้าไม่ติดคูลดาวน์)
+    if (key === "q" && dribbleCooldownTimer <= 0) {
+      dribbleActive = true;
+      dribbleTimer = 100;
+      dribbleCooldownTimer = 200;
+    }
+
+    // กด F เพื่อเตะบอลลอยออกไปข้างหน้า ตามทิศที่หันหน้าอยู่ (ต้องมีบอลติดขาก่อน)
+    if (key === "f" && hasBall) {
+      hasBall = false;
+      ballMoving = true;
+      ballVX = lastDirX * 12; // ความเร็วบอลตอนเตะออกไป
+      ballVY = lastDirY * 12;
+    }
+
+    // กด E เพื่อแย่งบอลคืนจากฝ่ายตรงข้าม (ต้องเข้าไปใกล้ ๆ ตัวมันก่อน และไม่ติดเวลาป้องกันของฝ่ายตรงข้าม)
+    if (key === "e" && oppHasBall && oppStealImmuneTimer <= 0) {
+      let edx = x - oppX;
+      let edy = y - oppY;
+      let edistance = Math.sqrt(edx * edx + edy * edy);
+      if (edistance < 50) {
+        oppHasBall = false;
+        hasBall = true; // แย่งบอลคืนสำเร็จ!
+        stealImmuneTimer = 100; // อีก 3 วินาที ฝ่ายตรงข้ามแย่งคืนไม่ได้
+      }
+    }
+
+    draw();
+  });
+
+  // พอปล่อยปุ่มทิศทาง ให้หยุดเดินไปทางนั้น
+  document.addEventListener("keyup", function (e) {
+    let key = e.key.toLowerCase();
+    if (e.key === "ArrowRight" || key === "d") moveRight = false;
+    if (e.key === "ArrowLeft" || key === "a") moveLeft = false;
+    if (e.key === "ArrowUp" || key === "w") moveUp = false;
+    if (e.key === "ArrowDown" || key === "s") moveDown = false;
+  });
+
+  // game loop: ให้คอมพิวเตอร์ทำงานซ้ำ ๆ เร็วมาก (ทุก 30 มิลลิวินาที)
+  // เพื่อขยับฝ่ายตรงข้ามและเช็คว่าชนนักเตะของเต้หรือยัง แม้เต้ไม่ได้กดปุ่มเลย
+  setInterval(function () {
+    if (state !== "playing") return; // ขยับฝ่ายตรงข้ามเฉพาะตอนกำลังเล่นเท่านั้น
+
+    // ถ้ากำลังใช้สกิลวิ่งเร็วอยู่ ให้เดินเร็วขึ้น 2 เท่า
+    let currentSpeed = sprintActive ? speed * 2 : speed;
+    let playerMoved = false;
+
+    // ขยับนักเตะของเต้ต่อเนื่องตามปุ่มที่กดค้างไว้ (ความเร็วเท่ากับฝ่ายตรงข้ามเป๊ะ)
+    if (moveRight) { x += currentSpeed; lastDirX = 1; lastDirY = 0; playerMoved = true; }
+    if (moveLeft) { x -= currentSpeed; lastDirX = -1; lastDirY = 0; playerMoved = true; }
+    if (moveUp) { y -= currentSpeed; lastDirX = 0; lastDirY = -1; playerMoved = true; }
+    if (moveDown) { y += currentSpeed; lastDirX = 0; lastDirY = 1; playerMoved = true; }
+
+    // นับจังหวะแล้วสลับท่าขาของเต้ ให้ดูเหมือนกำลังวิ่งอยู่
+    if (playerMoved) {
+      stepCounter++;
+      if (stepCounter >= 5) {
+        legFrame = legFrame === 0 ? 1 : 0;
+        stepCounter = 0;
+      }
+    }
+
+    if (!hasBall && !oppHasBall && !ballMoving) {
+      // ไม่มีใครมีบอล และบอลไม่ได้ลอยอยู่ เช็คว่านักเตะเดินไปใกล้บอลหรือยัง (ระยะห่างน้อยกว่า 40 ถือว่าแตะโดน)
+      let pdx = x - ballX;
+      let pdy = y - ballY;
+      let pdistance = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pdistance < 40) {
+        hasBall = true; // แตะโดนบอลแล้ว บอลติดขาไปด้วย
+      }
+    } else if (hasBall) {
+      // มีบอลติดขาอยู่ เช็คว่าเดินเข้าไปในประตูฝั่งไหนฝั่งหนึ่งหรือยัง
+      if (isInRightGoal(x, y)) {
+        score = score + 1;       // เข้าประตูฝ่ายตรงข้าม! เพิ่มคะแนนเต้
+        hasBall = false;
+        celebrateTimer = 60;     // ทำท่าฉลองประมาณ 2 วินาที
+        x = playerSpawnX;        // ย้ายนักเตะกลับไปเริ่มใหม่หน้าประตูของตัวเอง
+        y = playerSpawnY;
+        moveBallToCenter();
+      } else if (isInLeftGoal(x, y)) {
+        computerScore = computerScore + 1; // เข้าประตูตัวเอง! เพิ่มคะแนนให้ฝ่ายตรงข้ามแทน
+        hasBall = false;
+        x = playerSpawnX;
+        y = playerSpawnY;
+        moveBallToCenter();
+      }
+    }
+
+    moveOpponent(); // ขยับฝ่ายตรงข้ามขึ้นลง
+
+    // เช็คระยะห่างระหว่างนักเตะของเต้กับฝ่ายตรงข้าม
+    let dx = x - oppX;
+    let dy = y - oppY;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+
+    // ระยะที่ฝ่ายตรงข้ามต้องเข้าใกล้ถึงจะแย่งบอลได้ ปกติ 50 แต่ถ้าเต้ใช้สกิลเลี้ยงบอลอยู่จะเหลือแค่ 20 (แย่งยากขึ้นมาก)
+    let stealDistance = dribbleActive ? 20 : 50;
+
+    // ถ้าเข้าใกล้กันมาก ๆ ฝ่ายตรงข้ามจะแย่งบอลจากเต้ไปเอง
+    // (ยกเว้นตอนมีโล่ป้องกัน หรือเพิ่งแย่งบอลคืนมาด้วยปุ่ม E ยังติดเวลาป้องกันอยู่)
+    // ส่วนเต้ต้องกด E เองถึงจะแย่งบอลคืนได้ (ดูปุ่ม keydown ด้านล่าง)
+    if (distance < stealDistance && hasBall && !shieldActive && stealImmuneTimer <= 0) {
+      hasBall = false;
+      oppHasBall = true;
+      oppStealImmuneTimer = 100; // อีก 3 วินาที เต้แย่งบอลคืนไม่ได้
+    }
+
+    if (stealImmuneTimer > 0) stealImmuneTimer--;
+    if (oppStealImmuneTimer > 0) oppStealImmuneTimer--;
+
+    if (dribbleTimer > 0) {
+      dribbleTimer--;
+      if (dribbleTimer <= 0) dribbleActive = false;
+    }
+    if (dribbleCooldownTimer > 0) dribbleCooldownTimer--;
+
+    // ถ้าบอลกำลังลอยอยู่ (เพิ่งถูกเตะ) ให้ขยับบอลไปตามความเร็วของมัน
+    if (ballMoving) {
+      ballX += ballVX;
+      ballY += ballVY;
+
+      // ให้บอลหมุนไปด้วยตอนลอยอยู่ ยิ่งบอลไปเร็วก็ยิ่งหมุนเร็ว
+      ballRotation += Math.sqrt(ballVX * ballVX + ballVY * ballVY) * 0.15;
+
+      // แรงเสียดทาน ทำให้บอลค่อย ๆ ช้าลงเรื่อย ๆ
+      ballVX *= 0.98;
+      ballVY *= 0.98;
+
+      // ชนขอบบนหรือล่าง ให้เด้งกลับ
+      if (ballY < 30 || ballY > canvas.height - 30) {
+        ballVY = -ballVY;
+      }
+
+      if (isInRightGoal(ballX, ballY)) {
+        // บอลลอยเข้าประตูฝ่ายตรงข้ามพอดี! เพิ่มคะแนนเต้
+        score = score + 1;
+        celebrateTimer = 60; // ทำท่าฉลองประมาณ 2 วินาที
+        x = playerSpawnX;
+        y = playerSpawnY;
+        moveBallToCenter();
+      } else if (isInLeftGoal(ballX, ballY)) {
+        // บอลลอยเข้าประตูตัวเองพอดี! เพิ่มคะแนนให้ฝ่ายตรงข้ามแทน
+        computerScore = computerScore + 1;
+        x = playerSpawnX;
+        y = playerSpawnY;
+        moveBallToCenter();
+      } else {
+        // ชนขอบซ้ายหรือขวาแต่ไม่เข้าประตู ให้เด้งกลับ
+        if (ballX < 30) {
+          ballX = 30;
+          ballVX = -ballVX;
+        }
+        if (ballX > canvas.width - 30) {
+          ballX = canvas.width - 30;
+          ballVX = -ballVX;
+        }
+      }
+
+      // ถ้าบอลช้าลงมาก ๆ ให้หยุดนิ่ง
+      let ballSpeed = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+      if (ballSpeed < 0.5) {
+        ballMoving = false;
+        ballVX = 0;
+        ballVY = 0;
+      }
+    }
+
+    // นับถอยหลังเวลาท่าฉลอง
+    if (celebrateTimer > 0) celebrateTimer--;
+
+    // นับถอยหลังเวลาสกิลและคูลดาวน์ทั้งหมด
+    if (sprintTimer > 0) {
+      sprintTimer--;
+      if (sprintTimer <= 0) sprintActive = false;
+    }
+    if (sprintCooldownTimer > 0) sprintCooldownTimer--;
+
+    if (shieldTimer > 0) {
+      shieldTimer--;
+      if (shieldTimer <= 0) shieldActive = false;
+    }
+    if (shieldCooldownTimer > 0) shieldCooldownTimer--;
+
+    draw();
+  }, 30);
+
+  // ตัวจับเวลา: ทำงานทุก 1 วินาที ลดเวลาที่เหลือลงทีละ 1
+  setInterval(function () {
+    if (state !== "playing") return;
+
+    timeLeft = timeLeft - 1;
+
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      state = "over"; // หมดเวลาแล้ว! จบเกม
+    }
+
+    draw();
+  }, 1000);
+
+  moveBallToCenter(); // วางบอลไว้กลางสนามตอนเริ่มเกม
+  draw(); // วาดครั้งแรกตอนเปิดเกม
+</script>
+
+</body>
+</html>

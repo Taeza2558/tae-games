@@ -1,0 +1,1663 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>เกมยิงซอมบี้ของเต้</title>
+<style>
+  /* ทำให้หน้าเว็บอยู่ตรงกลางจอ ดูเรียบร้อย เหมือนเกมอื่น ๆ ของเต้ */
+  body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #111;
+  }
+  canvas {
+    display: block;
+    border: 8px solid #3a2a1a;
+    border-radius: 6px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+    /* จำกัดขนาดไม่ให้ล้นจอ ถ้าจอเต้เล็กกว่าความละเอียดเกม จะย่อลงพอดีจอเอง */
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+  }
+</style>
+</head>
+<body>
+
+<!-- canvas คือ "ผ้าใบ" ที่เราจะวาดรูปทุกอย่างของเกมลงไป (ขยายจอใหญ่ขึ้นตามที่เต้ขอ) -->
+<canvas id="game" width="1920" height="1080"></canvas>
+
+<script>
+  // ดึง canvas มาใช้งาน และขอ "พู่กัน" (ctx) สำหรับวาดรูป
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // มุมมอง FPV (First Person View): กล้องอยู่ที่สายตาของเต้ มองออกไปข้างหน้าตามทิศที่หันหน้าอยู่จริง ๆ
+  // เหมือนเกมรถแข่งของเต้ แต่คราวนี้เป็นการเดิน ไม่ใช่ขับรถ
+  let horizonY = canvas.height * 0.42; // เส้นขอบฟ้า อยู่ตรงไหนของจอ
+  let focalLength = 500;   // ระยะเลนส์ (มากขึ้น = เหมือนซูมเข้า)
+  let cameraHeight = 40;   // สายตาของเต้อยู่สูงแค่ไหนจากพื้น
+  let nearClip = 0.2;      // ระยะใกล้สุดที่กล้องยังมองเห็น (ใกล้กว่านี้ถือว่าอยู่หลังกล้อง)
+  // ลดลงมาก (5 -> 1 -> 0.2): ตอนเต้เดินเลียบกำแพง/ลังไม้ใกล้ ๆ แล้วมองไปตามแนวกำแพง ท่อนสั้น ๆ ที่อยู่ตรงหน้าพอดี
+  // อาจมี depth ต่ำกว่า nearClip ทั้งสองปลายพร้อมกัน ทำให้ท่อนนั้นถูกข้ามการวาดทั้งท่อน (เห็นทะลุ) ค่าที่เล็กลงช่วยลดโอกาสนี้
+
+  // ตำแหน่งของเต้ในโลกเกม: playerX, playerY คือพิกัด, playerAngle คือทิศที่หันหน้าอยู่ (0 = หันขึ้น)
+  let playerX = 0;
+  let playerY = 0;
+  let playerAngle = 0;
+  let moveSpeed = 3.2;  // เดินหน้า/ถอยหลัง/สไลด์ข้างทีละกี่หน่วยต่อครั้ง
+
+  // ปุ่ม WASD: W เดินหน้า, S ถอยหลัง, A/D เต้ขอเปลี่ยนจากเลี้ยวเป็นขยับสไลด์แนวข้างแทน (หันตัวใช้เมาส์ลากขวาแทน)
+  let moveForward = false;
+  let moveBackward = false;
+  let strafeLeft = false;
+  let strafeRight = false;
+
+  document.addEventListener("keydown", (e) => {
+    let key = e.key.toLowerCase();
+    if (key === "w") moveForward = true;
+    if (key === "s") moveBackward = true;
+    if (key === "a") strafeLeft = true;
+    if (key === "d") strafeRight = true;
+    if (key === " ") {
+      e.preventDefault(); // กันไม่ให้จอเลื่อนตอนกด Space
+      shoot();
+    }
+    if (key === "r" && gameOver) resetGame();
+    if (key === "b" && !gameOver) shopOpen = !shopOpen; // เปิด/ปิดร้านค้าปืน
+    if (shopOpen) {
+      let idx = parseInt(key, 10) - 1;
+      if (!isNaN(idx)) buyOrEquipGun(idx); // กด 1-4 ซื้อ/สวมใส่ปืนตอนร้านเปิดอยู่
+    }
+  });
+  document.addEventListener("keyup", (e) => {
+    let key = e.key.toLowerCase();
+    if (key === "w") moveForward = false;
+    if (key === "s") moveBackward = false;
+    if (key === "a") strafeLeft = false;
+    if (key === "d") strafeRight = false;
+  });
+
+  // บังคับกล้องด้วยเมาส์ตามที่เต้ขอ (สลับปุ่มแล้ว): กดปุ่มขวาค้างแล้วลากซ้าย-ขวาเพื่อหันตัว, คลิกซ้ายเพื่อยิง
+  // (ปุ่ม A/D กับ Space บนคีย์บอร์ดยังใช้ได้เหมือนเดิม เผื่อเต้อยากสลับไปมา)
+  let isDragging = false;
+  let lastMouseX = 0;
+  let mouseTurnSensitivity = 0.006;
+
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // กันเมนูคลิกขวาของเบราว์เซอร์เด้งขึ้นมา
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 2) {
+      isDragging = true;
+      lastMouseX = e.clientX;
+    } else if (e.button === 0) {
+      shoot(); // คลิกซ้าย = ยิง
+    }
+  });
+  canvas.addEventListener("mouseup", (e) => {
+    if (e.button === 2) isDragging = false;
+  });
+  canvas.addEventListener("mouseleave", () => {
+    isDragging = false; // เผื่อลากเมาส์ออกนอกจอเกม กันค้างโหมดลาก
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    let deltaX = e.clientX - lastMouseX;
+    playerAngle += deltaX * mouseTurnSensitivity;
+    lastMouseX = e.clientX;
+  });
+
+  // แปลงจุด (wx, wy) ในโลกเกม ให้กลายเป็นพิกัด "เทียบกับกล้อง" ของเต้
+  // lateral = อยู่ซ้าย/ขวาแค่ไหน (บวก = ขวา), depth = อยู่ข้างหน้าแค่ไหน (บวก = ข้างหน้า)
+  function toCameraSpace(wx, wy) {
+    let dx = wx - playerX;
+    let dy = wy - playerY;
+    let s = Math.sin(playerAngle);
+    let c = Math.cos(playerAngle);
+    return {
+      lateral: dx * c + dy * s,
+      depth: dx * s - dy * c,
+    };
+  }
+
+  // ท้องฟ้ายามค่ำคืน ไล่สีจากฟ้ามืดด้านบนลงมาเป็นสีเทาเข้มตรงขอบฟ้า บรรยากาศซอมบี้บุก
+  let skyGradient = ctx.createLinearGradient(0, 0, 0, horizonY);
+  skyGradient.addColorStop(0, "#0d1421");
+  skyGradient.addColorStop(1, "#2b2b28");
+
+  // ดาวระยิบระยับ สุ่มตำแหน่งไว้ครั้งเดียวตอนเริ่มเกม (คงที่ ไม่ขยับตามการเดิน เหมือนท้องฟ้าจริงที่อยู่ไกลมาก)
+  let stars = [];
+  for (let i = 0; i < 60; i++) {
+    stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * horizonY * 0.9,
+      r: Math.random() * 1.5 + 0.5,
+    });
+  }
+
+  // ตึกเงาดำริมขอบฟ้า ให้บรรยากาศเมืองร้างยามค่ำคืนแบบซอมบี้บุก (เต้ขอให้ทำพื้นหลังกลางคืนให้ชัดเจนขึ้น)
+  // สุ่มไว้ครั้งเดียวตอนเริ่มเกม คงที่เหมือนดาว/พระจันทร์ ไม่ขยับตามการเดิน
+  let buildings = [];
+  let bx = -40;
+  while (bx < canvas.width + 40) {
+    let w = 50 + Math.random() * 70;
+    let h = 40 + Math.random() * 110;
+    buildings.push({ x: bx, w: w, h: h });
+    bx += w - 8; // ให้ตึกซ้อนขอบกันนิดหน่อย ไม่มีช่องว่างขาว ๆ ระหว่างตึก
+  }
+  // หน้าต่างไฟสว่างในตึกบางบาน สุ่มไว้ล่วงหน้าเหมือนกัน (บ้านร้างก็ยังมีไฟค้างเปิดทิ้งไว้บางดวง น่าขนลุกดี)
+  let buildingWindows = [];
+  for (let b of buildings) {
+    let winCount = Math.floor(Math.random() * 4);
+    for (let i = 0; i < winCount; i++) {
+      buildingWindows.push({
+        x: b.x + 8 + Math.random() * (b.w - 20),
+        y: horizonY - 10 - Math.random() * (b.h - 20),
+      });
+    }
+  }
+
+  function drawSky() {
+    ctx.fillStyle = skyGradient;
+    ctx.fillRect(0, 0, canvas.width, horizonY);
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    for (let s of stars) {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // พระจันทร์กลม ๆ มุมบนขวา
+    ctx.fillStyle = "#e8e6c9";
+    ctx.beginPath();
+    ctx.arc(canvas.width - 100, 90, 45, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ตึกเงาดำเรียงกันตลอดแนวขอบฟ้า
+    ctx.fillStyle = "#12100f";
+    for (let b of buildings) {
+      ctx.fillRect(b.x, horizonY - b.h, b.w, b.h);
+    }
+    // หน้าต่างไฟสีเหลืองอุ่น ๆ
+    ctx.fillStyle = "#e8c46a";
+    for (let w of buildingWindows) {
+      ctx.fillRect(w.x, w.y, 6, 8);
+    }
+  }
+
+  // พื้นถนน สีเทาเข้ม เต็มครึ่งล่างของจอ
+  let groundColor = "#3d3a34";
+  function drawGround() {
+    ctx.fillStyle = groundColor;
+    ctx.fillRect(0, horizonY, canvas.width, canvas.height - horizonY);
+  }
+
+  // เส้นตารางพื้น ให้เห็นระยะและทิศทางตอนเดิน (เหมือนพื้นสนามแข่งของเต้ แต่เป็นตารางเปิดโล่ง)
+  // วางเส้นเป็นตารางรอบตัวเต้เสมอ (คำนวณจากตำแหน่งปัจจุบัน) ให้ดูเหมือนพื้นไม่มีที่สิ้นสุด
+  let gridSpacing = 150; // ระยะห่างแต่ละเส้นตาราง
+  let gridRange = 1200;  // วาดตารางไกลแค่ไหนรอบตัวเต้
+  let maxGridDepth = 1400; // ไกลกว่านี้ไม่ต้องวาด กันเส้นแน่นเกินไปตรงขอบจอ
+
+  function drawGroundSegment(x1, y1, x2, y2) {
+    let a = toCameraSpace(x1, y1);
+    let b = toCameraSpace(x2, y2);
+    if (a.depth < nearClip && b.depth < nearClip) return; // ทั้งคู่อยู่หลังกล้อง ข้ามไปเลย
+    if (a.depth < nearClip) {
+      let t = (nearClip - a.depth) / (b.depth - a.depth);
+      a = { lateral: a.lateral + (b.lateral - a.lateral) * t, depth: nearClip };
+    } else if (b.depth < nearClip) {
+      let t = (nearClip - b.depth) / (a.depth - b.depth);
+      b = { lateral: b.lateral + (a.lateral - b.lateral) * t, depth: nearClip };
+    }
+    if (a.depth > maxGridDepth && b.depth > maxGridDepth) return;
+    let sa = focalLength / a.depth, sb = focalLength / b.depth;
+    let ax = canvas.width / 2 + a.lateral * sa, ay = horizonY + cameraHeight * sa;
+    let bx = canvas.width / 2 + b.lateral * sb, by = horizonY + cameraHeight * sb;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+
+  function drawGroundGrid() {
+    ctx.strokeStyle = "rgba(140,150,110,0.35)";
+    ctx.lineWidth = 1.5;
+    let baseX = Math.floor(playerX / gridSpacing) * gridSpacing;
+    let baseY = Math.floor(playerY / gridSpacing) * gridSpacing;
+    for (let gx = baseX - gridRange; gx <= baseX + gridRange; gx += gridSpacing) {
+      for (let gy = baseY - gridRange; gy <= baseY + gridRange; gy += gridSpacing) {
+        drawGroundSegment(gx, gy, gx + gridSpacing, gy);
+        drawGroundSegment(gx, gy, gx, gy + gridSpacing);
+      }
+    }
+  }
+
+  // หมอกจาง ๆ ตรงขอบฟ้า กลืนเส้นตารางที่อยู่ไกลสุดให้หายเข้าไปในท้องฟ้าแบบนุ่มนวล ไม่ตัดขาดกระทันหัน
+  function drawHaze() {
+    let hazeH = 100;
+    let g = ctx.createLinearGradient(0, horizonY, 0, horizonY + hazeH);
+    g.addColorStop(0, "rgba(43,43,40,0.9)");
+    g.addColorStop(1, "rgba(43,43,40,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, horizonY, canvas.width, hazeH);
+  }
+
+  // กำแพงรอบสนาม ตามที่เต้ขอ: กั้นเป็นพื้นที่เล่นสี่เหลี่ยม เดินทะลุไม่ได้ และซอมบี้เกิดอยู่ในกำแพงเท่านั้น
+  // เต้ขอให้กำแพงมีความยาวขึ้น เลยยืดด้านยาว (แกน y ทิศข้างหน้า ที่มีที่กำบัง/ซอมบี้อยู่) ให้ยาวกว่าด้านกว้าง (แกน x) แทนที่จะเป็นสี่เหลี่ยมจัตุรัสเหมือนเดิม
+  let wallBounds = { minX: -700, maxX: 700, minY: -1400, maxY: 700 };
+  let wallHeight = 400; // เต้ยังเจอบั๊กมองทะลุกำแพงตอนเข้าใกล้ เลยเพิ่มความสูงกำแพงเยอะ ๆ กันไม่ให้เห็นขอบบนตอนอยู่ใกล้ ๆ
+
+  // แบ่งกำแพงรอบขอบสี่เหลี่ยมเป็นท่อน ๆ สั้น ๆ (เหมือนเส้นตารางพื้น) จะได้วาดแบบมีระยะใกล้-ไกลถูกต้อง
+  let wallSegments = [];
+  function buildWallSegments() {
+    wallSegments = [];
+    let corners = [
+      { x: wallBounds.minX, y: wallBounds.minY },
+      { x: wallBounds.maxX, y: wallBounds.minY },
+      { x: wallBounds.maxX, y: wallBounds.maxY },
+      { x: wallBounds.minX, y: wallBounds.maxY },
+    ];
+    let segLen = 50; // ย่อท่อนให้สั้นลง (เดิม 200) ลดผลกระทบตอนบางท่อนโดนคัลเพราะมองเฉียงใกล้ ๆ
+    for (let i = 0; i < 4; i++) {
+      let p0 = corners[i], p1 = corners[(i + 1) % 4];
+      let dx = p1.x - p0.x, dy = p1.y - p0.y;
+      let steps = Math.ceil(Math.hypot(dx, dy) / segLen);
+      for (let s = 0; s < steps; s++) {
+        let t0 = s / steps, t1 = (s + 1) / steps;
+        wallSegments.push({
+          x1: p0.x + dx * t0, y1: p0.y + dy * t0,
+          x2: p0.x + dx * t1, y2: p0.y + dy * t1,
+        });
+      }
+    }
+  }
+  buildWallSegments();
+
+  // ดันตำแหน่ง (x, y) ให้อยู่ในขอบเขตกำแพงเสมอ (entityRadius คือขนาดตัวของคนที่เดิน) ใช้ทั้งเต้ ซอมบี้ และจุดเกิดซอมบี้
+  function resolveWallCollision(x, y, entityRadius) {
+    let m = entityRadius;
+    if (x < wallBounds.minX + m) x = wallBounds.minX + m;
+    if (x > wallBounds.maxX - m) x = wallBounds.maxX - m;
+    if (y < wallBounds.minY + m) y = wallBounds.minY + m;
+    if (y > wallBounds.maxY - m) y = wallBounds.maxY - m;
+    return { x, y };
+  }
+
+  // วาดกำแพงหนึ่งท่อน เป็นรูปสี่เหลี่ยมคางหมูมีความสูง (บน-ล่างของกำแพง) แบบเดียวกับเส้นตารางพื้นแต่มีมิติสูงด้วย
+  // สุ่มเลขคงที่ตาม seed (ไม่ใช่ Math.random() ที่เปลี่ยนทุกเฟรม) ให้ลายหินไม่กระพริบตอนวาดซ้ำ ๆ
+  function pseudoRandom(seed) {
+    let x = Math.sin(seed * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  // โทนสีก้อนหินตามภาพกำแพงหินที่เต้ส่งมา (หินสีเทาอมน้ำตาลอ่อน หลายเฉด)
+  let stonePalette = ["#d8d0bc", "#c7bfa8", "#b6ad93", "#a49a80", "#948a76"];
+
+  function drawWallSegment(seg, segIndex) {
+    let a = toCameraSpace(seg.x1, seg.y1);
+    let b = toCameraSpace(seg.x2, seg.y2);
+    if (a.depth < nearClip && b.depth < nearClip) return;
+    if (a.depth < nearClip) {
+      let t = (nearClip - a.depth) / (b.depth - a.depth);
+      a = { lateral: a.lateral + (b.lateral - a.lateral) * t, depth: nearClip };
+    } else if (b.depth < nearClip) {
+      let t = (nearClip - b.depth) / (a.depth - b.depth);
+      b = { lateral: b.lateral + (a.lateral - b.lateral) * t, depth: nearClip };
+    }
+    if (a.depth > 2200 && b.depth > 2200) return; // ไกลเกินไป ไม่ต้องวาด
+
+    // กันไม่ให้ระยะใกล้เกินไปแล้วคำนวณสเกลระเบิดจนกำแพงคลุมทั้งจอ (จำกัดระยะใกล้สุดที่ใช้คิดสเกล)
+    let sa = focalLength / Math.max(a.depth, 40), sb = focalLength / Math.max(b.depth, 40);
+    let ax = canvas.width / 2 + a.lateral * sa;
+    let agroundY = horizonY + cameraHeight * sa;
+    let atopY = horizonY + (cameraHeight - wallHeight) * sa;
+    let bx = canvas.width / 2 + b.lateral * sb;
+    let bgroundY = horizonY + cameraHeight * sb;
+    let btopY = horizonY + (cameraHeight - wallHeight) * sb;
+
+    // กำแพงหินกองซ้อนกัน ตามภาพที่เต้ส่งมา: ตารางก้อนหินเล็ก ๆ สีเทาอมน้ำตาลหลายเฉด สลับสุ่ม ไม่ใช่บล็อกอิฐเรียบ ๆ
+    let rows = 6, cols = 5;
+    for (let r = 0; r < rows; r++) {
+      let u0 = r / rows, u1 = (r + 1) / rows;
+      for (let c = 0; c < cols; c++) {
+        let t0 = c / cols, t1 = (c + 1) / cols;
+        // มุมซ้าย-ขวาของบล็อกนี้ตามแนวท่อนกำแพง (a -> b)
+        let leftX = ax + (bx - ax) * t0, rightX = ax + (bx - ax) * t1;
+        let leftTop = atopY + (btopY - atopY) * t0, rightTop = atopY + (btopY - atopY) * t1;
+        let leftGround = agroundY + (bgroundY - agroundY) * t0, rightGround = agroundY + (bgroundY - agroundY) * t1;
+        // มุมบน-ล่างของบล็อกนี้ตามความสูงกำแพง
+        let ltY = leftTop + (leftGround - leftTop) * u0, lbY = leftTop + (leftGround - leftTop) * u1;
+        let rtY = rightTop + (rightGround - rightTop) * u0, rbY = rightTop + (rightGround - rightTop) * u1;
+
+        // สุ่มสีหินจากพาเลตหิน (คงที่ต่อก้อนตาม seed ไม่กระพริบ) + แถวบนสว่างกว่าแถวล่างนิดหน่อย
+        let seed = segIndex * 151 + r * 17 + c * 7;
+        let paletteIdx = Math.floor(pseudoRandom(seed) * stonePalette.length);
+        ctx.fillStyle = stonePalette[paletteIdx];
+        ctx.beginPath();
+        ctx.moveTo(leftX, ltY);
+        ctx.lineTo(rightX, rtY);
+        ctx.lineTo(rightX, rbY);
+        ctx.lineTo(leftX, lbY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0," + (0.12 + r * 0.02) + ")"; // เงาไล่เข้มลงล่างทับบนสีหิน
+        ctx.fill();
+
+        // ร่องหินเข้ม ๆ รอบก้อน ให้เห็นเป็นก้อนแยกกันชัดเจนแบบหินก่อจริง
+        ctx.strokeStyle = "rgba(40,32,20,0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // จุดไฮไลต์กลมมนตรงมุมบนซ้ายของก้อน จำลองผิวหินโค้งมนรับแสง (แทนขอบเหลี่ยมแบบบล็อกอิฐ)
+        let hlX = leftX + (rightX - leftX) * (0.3 + pseudoRandom(seed + 1) * 0.15);
+        let hlY = ltY + (lbY - ltY) * (0.3 + pseudoRandom(seed + 2) * 0.15);
+        let hlR = Math.max(1, (rightX - leftX) * 0.18);
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        ctx.beginPath();
+        ctx.ellipse(hlX, hlY, hlR, hlR * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(ax, atopY); ctx.lineTo(bx, btopY);
+    ctx.lineTo(bx, bgroundY); ctx.lineTo(ax, agroundY);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  function drawWalls() {
+    for (let i = 0; i < wallSegments.length; i++) drawWallSegment(wallSegments[i], i);
+  }
+
+  // ที่กำบัง (ลังไม้): กันไม่ให้เต้กับซอมบี้เดินทะลุผ่านได้ เต้ขอไว้เป็นจุดหลบซ่อน
+  // วางไว้ล่วงหน้าเป็นจุดคงที่ ข้างหน้าจุดเกิดของเต้ (ทิศ -y คือข้างหน้า)
+  let coverSpots = [
+    { x: 120, y: -170, radius: 45 },
+    { x: -140, y: -260, radius: 45 },
+    { x: 200, y: -350, radius: 45 },
+    { x: -100, y: -440, radius: 45 },
+    { x: 50, y: -580, radius: 45 }, // ขยับเข้ามาให้ยังอยู่ในกำแพงใหม่ที่เล็กลงอีกรอบ (±700)
+  ];
+
+  // กำแพงลังไม้แต่ละอันมีรูช่องเปิดให้เดินผ่านได้ตรงกลางตามที่เต้ขอ (ไม่งั้นเดินผ่านไม่ได้เลยเพราะยาวเต็มสนาม)
+  // เลยแบ่งเป็น 2 ท่อน (ซ้ายของรู, ขวาของรู) แทนที่จะเป็นแท่งเดียวยาวทึบตลอด
+  let coverGapHalfWidth = 220; // ความกว้างครึ่งหนึ่งของรู (รวมกว้าง 440 หน่วย) เต้ขอให้ทางเดินใหญ่ขึ้นอีก
+
+  function coverSegments(c) {
+    let hw = c.radius * 0.7;
+    let gapMinX = c.x - coverGapHalfWidth, gapMaxX = c.x + coverGapHalfWidth;
+    let minY = c.y - hw, maxY = c.y + hw;
+    let segs = [];
+    if (gapMinX > wallBounds.minX) segs.push({ minX: wallBounds.minX, maxX: gapMinX, minY, maxY });
+    if (gapMaxX < wallBounds.maxX) segs.push({ minX: gapMaxX, maxX: wallBounds.maxX, minY, maxY });
+    return segs;
+  }
+
+  // ดันตำแหน่ง (x, y) ออกจากที่กำบังทุกจุด ถ้าเดินเข้าไปใกล้เกินไป (entityRadius คือขนาดตัวของคนที่เดิน)
+  // ใช้ทั้งกับเต้เองและซอมบี้ ทำให้ที่กำบังกลายเป็นกำแพงกันซอมบี้เดินทะลุเข้ามาได้จริง ๆ
+  function resolveCoverCollision(x, y, entityRadius) {
+    for (let c of coverSpots) {
+      for (let b of coverSegments(c)) {
+        let minX = b.minX - entityRadius, maxX = b.maxX + entityRadius;
+        let minY = b.minY - entityRadius, maxY = b.maxY + entityRadius;
+        if (x > minX && x < maxX && y > minY && y < maxY) {
+          // อยู่ในกล่องขยาย ดันออกทางแกนที่ทะลุน้อยที่สุด (แบบกันชนกล่องสี่เหลี่ยมมาตรฐาน)
+          let overlapLeft = x - minX, overlapRight = maxX - x;
+          let overlapTop = y - minY, overlapBottom = maxY - y;
+          let minOverlapX = Math.min(overlapLeft, overlapRight);
+          let minOverlapY = Math.min(overlapTop, overlapBottom);
+          if (minOverlapX < minOverlapY) {
+            x = overlapLeft < overlapRight ? minX : maxX;
+          } else {
+            y = overlapTop < overlapBottom ? minY : maxY;
+          }
+        }
+      }
+    }
+    return { x, y };
+  }
+
+  // เช็คว่าเส้นยิงจาก (x1,y1) ถึง (x2,y2) โดนที่กำบังจุดไหนบังไว้มั้ย (กระสุนยิงทะลุที่กำบังไม่ได้ตามที่เต้ขอ)
+  // ใช้การตัดเส้นกับกล่องสี่เหลี่ยม (Liang-Barsky) แทนวงกลม ให้ตรงกับรูปทรงลังไม้แบบใหม่ (เว้นรูตรงกลางไว้)
+  function isBlockedByCover(x1, y1, x2, y2) {
+    for (let c of coverSpots) {
+      for (let b of coverSegments(c)) {
+        let minX = b.minX, maxX = b.maxX, minY = b.minY, maxY = b.maxY;
+        let dx = x2 - x1, dy = y2 - y1;
+        let p = [-dx, dx, -dy, dy];
+        let q = [x1 - minX, maxX - x1, y1 - minY, maxY - y1];
+        let tmin = 0, tmax = 1, blocked = true;
+        for (let i = 0; i < 4; i++) {
+          if (p[i] === 0) {
+            if (q[i] < 0) { blocked = false; break; }
+          } else {
+            let r = q[i] / p[i];
+            if (p[i] < 0) {
+              if (r > tmax) { blocked = false; break; }
+              if (r > tmin) tmin = r;
+            } else {
+              if (r < tmin) { blocked = false; break; }
+              if (r < tmax) tmax = r;
+            }
+          }
+        }
+        if (blocked && tmin <= tmax) return true;
+      }
+    }
+    return false;
+  }
+
+  // ผนังลังไม้ตอนนี้ยาวเต็มสนามแล้ว ต้องแบ่งเป็นท่อนสั้น ๆ ก่อนวาด (เหมือนกำแพง) ไม่งั้นมุมมองไกล-ใกล้จะเพี้ยน
+  function drawCoverFaceChunked(x1, y1, x2, y2, boxHeight) {
+    let dx = x2 - x1, dy = y2 - y1;
+    let dist = Math.hypot(dx, dy);
+    let steps = Math.max(1, Math.ceil(dist / 50)); // ย่อท่อนให้สั้นลง (เดิม 200) เหมือนที่ทำกับกำแพงเทา
+    for (let s = 0; s < steps; s++) {
+      let t0 = s / steps, t1 = (s + 1) / steps;
+      drawCoverFace(x1 + dx * t0, y1 + dy * t0, x1 + dx * t1, y1 + dy * t1, boxHeight);
+    }
+  }
+
+  // วาดผนังด้านหนึ่งของลังไม้ (จาก x1,y1 ถึง x2,y2 ในโลกจริง) เหมือนกำแพงย่อ ๆ แบบมีบล็อกลายไม้
+  // ใช้พิกัดโลกจริงตายตัว (ไม่ใช่บิลบอร์ดหันหาเต้เสมอ) ทำให้ลังไม้ไม่หมุนตามเต้อีกต่อไปตามที่เต้ขอ
+  function drawCoverFace(x1, y1, x2, y2, boxHeight) {
+    let a = toCameraSpace(x1, y1);
+    let b = toCameraSpace(x2, y2);
+    if (a.depth < nearClip && b.depth < nearClip) return;
+    if (a.depth < nearClip) {
+      let t = (nearClip - a.depth) / (b.depth - a.depth);
+      a = { lateral: a.lateral + (b.lateral - a.lateral) * t, depth: nearClip };
+    } else if (b.depth < nearClip) {
+      let t = (nearClip - b.depth) / (a.depth - b.depth);
+      b = { lateral: b.lateral + (a.lateral - b.lateral) * t, depth: nearClip };
+    }
+    let sa = focalLength / Math.max(a.depth, 40), sb = focalLength / Math.max(b.depth, 40);
+    let ax = canvas.width / 2 + a.lateral * sa, agroundY = horizonY + cameraHeight * sa, atopY = horizonY + (cameraHeight - boxHeight) * sa;
+    let bx = canvas.width / 2 + b.lateral * sb, bgroundY = horizonY + cameraHeight * sb, btopY = horizonY + (cameraHeight - boxHeight) * sb;
+
+    // แบ่งผนังนี้เป็น 2 บล็อกไม้สลับเข้ม-อ่อนตัดกันชัดเจน
+    for (let i = 0; i < 2; i++) {
+      let t0 = i / 2, t1 = (i + 1) / 2;
+      let lx = ax + (bx - ax) * t0, rx = ax + (bx - ax) * t1;
+      let lTop = atopY + (btopY - atopY) * t0, rTop = atopY + (btopY - atopY) * t1;
+      let lGround = agroundY + (bgroundY - agroundY) * t0, rGround = agroundY + (bgroundY - agroundY) * t1;
+      ctx.fillStyle = i === 0 ? "#8a5a2f" : "#5a3a1e";
+      ctx.beginPath();
+      ctx.moveTo(lx, lTop); ctx.lineTo(rx, rTop); ctx.lineTo(rx, rGround); ctx.lineTo(lx, lGround);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#1a0f08";
+      ctx.lineWidth = Math.max(1.5, (rx - lx) * 0.12);
+      ctx.stroke();
+    }
+
+    // ขอบสว่างบน + ขอบมืดล่าง ให้ผนังดูนูนมีมิติ
+    ctx.strokeStyle = "rgba(255,220,160,0.4)";
+    ctx.lineWidth = Math.max(1, (bx - ax) * 0.04 || 2);
+    ctx.beginPath();
+    ctx.moveTo(ax, atopY); ctx.lineTo(bx, btopY);
+    ctx.stroke();
+  }
+
+  // ลังไม้เป็นกล่องจริงตรึงอยู่กับโลก มีด้านชัดเจน 4 ด้าน วาดเฉพาะด้านที่หันเข้าหาเต้ (เหมือนกำแพง)
+  // ไม่ใช่บิลบอร์ดแบนที่หมุนหน้าเข้าหาเต้ตลอดเวลาแบบเดิมแล้ว เดินอ้อมดูจะเห็นคนละด้านจริง ๆ
+  function drawCover(c) {
+    let boxHeight = c.radius * 1.7 * 1.5; // เต้ขอลดความสูงลงอีก (2.5 เท่า -> 1.5 เท่า)
+
+    // เงาใต้กล่อง (จุดเดียวตรงกลาง ก่อนถึงรู)
+    let cs = toCameraSpace(c.x, c.y);
+    let scale = focalLength / Math.max(cs.depth, 40);
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale;
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(baseX, baseY, c.radius * 0.7 * scale, c.radius * 0.3 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // วาดแยกทีละท่อน (ซ้าย/ขวาของรู) แต่ละท่อนมี 2 ด้านยาว (เหนือ-ใต้) + ด้านตัดตรงขอบรู (ถ้ามี) ให้เห็นว่าเป็นรูจริง
+    for (let b of coverSegments(c)) {
+      let faces = [
+        { x1: b.minX, y1: b.minY, x2: b.maxX, y2: b.minY, nx: 0, ny: -1, mx: (b.minX + b.maxX) / 2, my: b.minY },
+        { x1: b.maxX, y1: b.maxY, x2: b.minX, y2: b.maxY, nx: 0, ny: 1, mx: (b.minX + b.maxX) / 2, my: b.maxY },
+      ];
+      if (b.minX > wallBounds.minX + 0.5) {
+        faces.push({ x1: b.minX, y1: b.maxY, x2: b.minX, y2: b.minY, nx: -1, ny: 0, mx: b.minX, my: (b.minY + b.maxY) / 2 });
+      }
+      if (b.maxX < wallBounds.maxX - 0.5) {
+        faces.push({ x1: b.maxX, y1: b.minY, x2: b.maxX, y2: b.maxY, nx: 1, ny: 0, mx: b.maxX, my: (b.minY + b.maxY) / 2 });
+      }
+      // วาดแค่ด้านที่หันออกไปทางเต้ (เต้อยู่ฝั่งเดียวกับทิศ normal) เหมือนกล่องทึบจริง ๆ ไม่ทะลุเห็นด้านหลัง
+      for (let f of faces) {
+        let dot = (playerX - f.mx) * f.nx + (playerY - f.my) * f.ny;
+        if (dot > 0) drawCoverFaceChunked(f.x1, f.y1, f.x2, f.y2, boxHeight);
+      }
+    }
+  }
+
+  // ซอมบี้: เกิดกระจายรอบ ๆ เต้ แล้วเดินเข้าหาเต้เสมอ ยิงโดนแล้วล้ม รอสักพักแล้วเกิดใหม่ที่อื่น
+  let zombies = [];
+  let zombieSpeed = 1.1; // เดินช้ากว่าเต้ (moveSpeed 3.2) เต้เลยวิ่งหนีได้ทัน แต่จะเร็วขึ้นเรื่อย ๆ ตามเลเวล
+  let zombiesKilled = 0;
+
+  // ระบบไต่ระดับ: ฆ่าซอมบี้ครบตามจำนวนที่กำหนด แล้วเลเวลขึ้น ยิ่งเลเวลสูงยิ่งยาก (ซอมบี้เดินเร็วขึ้น + มีจำนวนมากขึ้น)
+  // แต่ละเลเวลต้องฆ่าเพิ่มขึ้นทีละ 5 ตัวตามที่เต้ขอ (เลเวล 1 ต้องฆ่า 5, เลเวล 2 ต้องฆ่า 10, ... ไปจนสุดที่เลเวล 99)
+  let level = 1;
+  let maxLevel = 99;
+  let killsThisLevel = 0;
+  let killsPerLevel = level * 5;
+  let levelUpBannerTimer = 0;
+
+  // ระบบพลังชีวิตของเต้: โดนซอมบี้กัดแล้วเลือดลด เลือดหมดถือว่าเกมโอเวอร์
+  let playerMaxHP = 100;
+  let playerHP = playerMaxHP;
+  let damageFlashTimer = 0;
+  let gameOver = false;
+
+  // เงินในเกม: เหรียญได้แน่นอนทุกครั้งที่ฆ่าซอมบี้ (100%) ส่วนเพชรมีโอกาสได้แค่ 30% ตามที่เต้ขอ
+  // เอาไว้ซื้อปืนใหม่ในร้านค้า เก็บไว้ข้ามรอบ ตายแล้วเริ่มใหม่ก็ไม่หาย (เสียแค่เลเวล/ตำแหน่ง ไม่เสียของที่ซื้อไว้)
+  let coins = 0;
+  let diamonds = 0;
+  let lootPopups = []; // ตัวหนังสือ "+1" ลอยขึ้นตรงจุดที่ฆ่าซอมบี้ได้
+
+  // ไอเทมเพิ่มเลือด: มีโอกาสดรอปตรงจุดที่ซอมบี้ตาย (หัวหน้าซอมบี้ดรอปให้ชัวร์) เดินไปเหยียบถึงจะเก็บได้
+  let healthPickups = [];
+  let healthDropChance = 0.3; // ไม่ได้ดรอปทุกครั้ง ไม่งั้นเลือดจะเต็มง่ายเกินไป
+  let healAmount = 25;
+  let healthPickupLifespan = Math.round(10000 / 30); // อยู่ได้ 10 วินาทีตามที่เต้ขอ แล้วหายไปเองถ้าไม่ได้เก็บ
+
+  // หัวหน้าซอมบี้: เต้ขอให้มีแค่ 1 ตัวเท่านั้นตลอดทั้งเกม โผล่มาตอนเลเวลแรกที่หาร 10 ลงตัว (เลเวล 10)
+  // เลือดเยอะกว่าซอมบี้ธรรมดา 100 เท่าตามที่เต้ขอ ปราบได้แล้วได้ปืน RPG เป็นรางวัล
+  let bossAnnounceTimer = 0;
+  let bossRewardBannerTimer = 0;
+  let bossSpawned = false;  // เคยเกิดไปแล้วหรือยัง (กันไม่ให้เกิดซ้ำที่เลเวล 20, 30, ...)
+  let bossDefeated = false; // ปราบสำเร็จหรือยัง (ถ้ายัง ตายแล้วรีสตาร์ทจะเจอบอสตัวเดิมอีกครั้ง)
+
+  // ร้านค้าซื้อปืน: กด B เปิด/ปิดร้าน ตอนร้านเปิดโลกจะหยุดนิ่ง กด 1-4 เพื่อซื้อ/สวมใส่ปืนแต่ละกระบอก
+  let shopOpen = false;
+  let guns = [
+    { name: "ปืนพก", cost: 0, costType: "coin", dmg: 1, fireCooldown: 12, color: "#2a2a2a", highlight: "#5a5a5a", owned: true },
+    { name: "ปืนลูกซอง", cost: 25, costType: "coin", dmg: 2, fireCooldown: 18, color: "#5a3a1a", highlight: "#8a5a2a", owned: false },
+    { name: "ปืนกล", cost: 60, costType: "coin", dmg: 1, fireCooldown: 5, color: "#1a3a1a", highlight: "#3a6a3a", owned: false },
+    { name: "ปืนเพชร", cost: 8, costType: "diamond", dmg: 5, fireCooldown: 10, color: "#1a5a6a", highlight: "#3a9aae", owned: false },
+    { name: "ปืน RPG", cost: 0, costType: "boss", dmg: 15, fireCooldown: 35, color: "#3a4a2a", highlight: "#5a7a3a", owned: false },
+  ];
+  let equippedGun = 0;
+
+  function buyOrEquipGun(idx) {
+    let g = guns[idx];
+    if (!g) return;
+    if (g.owned) {
+      equippedGun = idx; // มีอยู่แล้ว กดซ้ำ = แค่สลับมาใช้กระบอกนี้
+      return;
+    }
+    if (g.costType !== "coin" && g.costType !== "diamond") return; // ปลดล็อกด้วยวิธีอื่น (เช่น RPG ต้องปราบบอส) ซื้อด้วยเงินไม่ได้
+    let balance = g.costType === "coin" ? coins : diamonds;
+    if (balance >= g.cost) {
+      if (g.costType === "coin") coins -= g.cost; else diamonds -= g.cost;
+      g.owned = true;
+      equippedGun = idx;
+    }
+  }
+
+  function randomZombieSpawnPoint() {
+    let angle = Math.random() * Math.PI * 2;
+    let dist = 500 + Math.random() * 600;
+    let x = playerX + Math.sin(angle) * dist;
+    let y = playerY - Math.cos(angle) * dist;
+    return resolveWallCollision(x, y, 40); // กันไม่ให้ซอมบี้เกิดทะลุกำแพงออกไปข้างนอก ตามที่เต้ขอ
+  }
+
+  // isBoss = true ให้เป็นหัวหน้าซอมบี้ (hp เยอะกว่าซอมบี้ธรรมดา 100 เท่าตามที่เต้ขอ) ปกติไม่ใส่พารามิเตอร์ = ซอมบี้ธรรมดา hp 1
+  function spawnNewZombie(isBoss) {
+    let p = randomZombieSpawnPoint();
+    let hp = isBoss ? 1 * 100 : 1;
+    // tint/woundSeed สุ่มไว้ตอนเกิดครั้งเดียว ให้แต่ละตัวหน้าตาไม่เหมือนกันเป๊ะ ๆ (สมจริงขึ้นตามที่เต้ขอ)
+    zombies.push({
+      x: p.x, y: p.y, alive: true, respawnTimer: 0, biteCooldown: 0, isBoss: !!isBoss, hp: hp, maxHp: hp,
+      tint: Math.random(), woundSeed: Math.random(),
+    });
+  }
+
+  for (let i = 0; i < 5; i++) spawnNewZombie();
+
+  function killZombie(z) {
+    z.alive = false;
+    z.respawnTimer = z.isBoss ? 0 : 90; // หัวหน้าซอมบี้ปราบแล้วไม่เกิดใหม่อีกเลยตามที่เต้ขอ (มีแค่ตัวเดียวตลอดเกม)
+    zombiesKilled++;
+
+    // เอฟเฟกต์ตอนตายให้สมจริงขึ้นตามที่เต้ขอ: ล้มลงกับพื้น + เลือดกระเซ็น + แอ่งเลือดติดพื้น
+    deathAnims.push({ x: z.x, y: z.y, isBoss: z.isBoss, life: 20, fallDir: Math.random() < 0.5 ? 1 : -1 });
+    spawnBloodSplatter(z.x, z.y);
+
+    // ของรางวัล: เหรียญได้ 100% เสมอ เพชรได้แค่ 30% ตามที่เต้ขอ (หัวหน้าซอมบี้ให้เยอะกว่าและได้เพชรชัวร์)
+    let coinGain = z.isBoss ? 10 : 1;
+    coins += coinGain;
+    let gotDiamond = z.isBoss ? true : Math.random() < 0.3;
+    if (gotDiamond) diamonds++;
+    let lootText = "+" + coinGain + "🪙" + (gotDiamond ? " +1💎" : "");
+    lootPopups.push({ x: z.x, y: z.y, timer: 40, text: lootText });
+
+    // ไอเทมเพิ่มเลือดตรงจุดที่ซอมบี้ตาย (หัวหน้าซอมบี้ดรอปให้ชัวร์) ตามที่เต้ขอ ต้องเดินไปเหยียบถึงจะเก็บได้
+    if (z.isBoss || Math.random() < healthDropChance) {
+      healthPickups.push({ x: z.x + (Math.random() - 0.5) * 30, y: z.y + (Math.random() - 0.5) * 30, active: true, life: healthPickupLifespan });
+    }
+
+    // ปราบหัวหน้าซอมบี้สำเร็จ! ได้ปืน RPG เป็นรางวัลตามที่เต้ขอ ปลดล็อกและสวมใส่ให้ทันที
+    if (z.isBoss) {
+      bossDefeated = true;
+      let rpgIndex = guns.findIndex((g) => g.costType === "boss");
+      if (rpgIndex !== -1) {
+        guns[rpgIndex].owned = true;
+        equippedGun = rpgIndex;
+      }
+      bossRewardBannerTimer = 150;
+    }
+
+    // ฆ่าครบตามจำนวนที่กำหนด เลเวลขึ้น! ยากขึ้นทีละนิด (หยุดที่เลเวลสูงสุด 99 ตามที่เต้ขอ)
+    if (level < maxLevel) {
+      killsThisLevel++;
+      if (killsThisLevel >= killsPerLevel) {
+        killsThisLevel = 0;
+        level++;
+        killsPerLevel = level * 5; // เลเวลใหม่ต้องฆ่าเพิ่มขึ้นอีก 5 ตัวจากเดิม
+        levelUpBannerTimer = 90;
+        zombieSpeed += 0.15;
+        spawnNewZombie(); // เลเวลสูงขึ้น มีซอมบี้กวนใจพร้อมกันมากขึ้นด้วย
+
+        // หัวหน้าซอมบี้มีแค่ 1 ตัวตลอดเกมตามที่เต้ขอ เกิดแค่ครั้งเดียวตอนเลเวลแรกที่หาร 10 ลงตัว
+        if (!bossSpawned && level % 10 === 0) {
+          spawnNewZombie(true);
+          bossSpawned = true;
+          bossAnnounceTimer = 120;
+        }
+      }
+    }
+  }
+
+  // ปรับสีให้อ่อน/เข้มลง (amount บวก = สว่างขึ้น, ลบ = มืดลง) ใช้ทำเฉดสีของแต่ละซอมบี้และแสง-เงา
+  function shadeColor(hex, amount) {
+    let num = parseInt(hex.slice(1), 16);
+    let r = Math.min(255, Math.max(0, (num >> 16) + amount));
+    let g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amount));
+    let b = Math.min(255, Math.max(0, (num & 0xff) + amount));
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
+  function drawZombie(z) {
+    let cs = toCameraSpace(z.x, z.y);
+    let scale = focalLength / Math.max(cs.depth, 40); // กันตัวใหญ่คลุมทั้งจอตอนเข้าใกล้มาก ๆ
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale;
+    let sizeMul = z.isBoss ? 1.8 : 1; // หัวหน้าซอมบี้ตัวใหญ่กว่าซอมบี้ธรรมดา
+    let bodyH = 55 * scale * sizeMul, bodyW = 26 * scale * sizeMul, headR = 13 * scale * sizeMul;
+    // สีเพี้ยนไปนิดหน่อยตาม tint ของแต่ละตัว (สุ่มไว้ตอนเกิด) ให้ไม่เหมือนกันเป๊ะ ๆ สมจริงขึ้น
+    let tint = z.tint || 0;
+    let bodyColor = z.isBoss ? "#5a1f1f" : shadeColor("#4d5a45", (tint - 0.5) * 24);
+    let armColor = z.isBoss ? "#8a3a3a" : shadeColor("#7c9270", (tint - 0.5) * 24);
+    let legColor = shadeColor("#332a20", (tint - 0.5) * 16);
+    let legH = bodyH * 0.4, torsoH = bodyH - legH;
+    let torsoTopY = baseY - bodyH, torsoBotY = baseY - legH;
+
+    // เดินแบบซอมบี้เซๆ: ขาสองข้างสลับก้าวไม่พร้อมกัน (walkPhase ต่างกันตาม z.x กันไม่ให้ซอมบี้ทุกตัวเดินตรงกัน)
+    let walkPhase = Math.sin(Date.now() / 220 + z.x * 0.15);
+    let legSwing = walkPhase * bodyW * 0.22;
+
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath();
+    ctx.ellipse(baseX, baseY, bodyW * 0.7, bodyW * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ขาสองข้าง (กางเกงเก่า ๆ สีเข้ม) สลับก้าวเดิน
+    ctx.fillStyle = legColor;
+    ctx.fillRect(baseX - bodyW * 0.3 + legSwing, torsoBotY, bodyW * 0.4, legH);
+    ctx.fillRect(baseX - bodyW * 0.1 - legSwing, torsoBotY, bodyW * 0.4, legH);
+
+    // ลำตัว ไล่เฉดให้มีมิติ + ขอบล่างเสื้อขาดเป็นชายไม่เรียบ (jagged) แทนสี่เหลี่ยมเรียบ ๆ
+    let bodyGrad = ctx.createLinearGradient(baseX - bodyW / 2, torsoTopY, baseX + bodyW / 2, torsoBotY);
+    bodyGrad.addColorStop(0, shadeColor(bodyColor, 18));
+    bodyGrad.addColorStop(1, shadeColor(bodyColor, -18));
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(baseX - bodyW / 2, torsoTopY);
+    ctx.lineTo(baseX + bodyW / 2, torsoTopY);
+    ctx.lineTo(baseX + bodyW / 2, torsoBotY - bodyH * 0.04);
+    ctx.lineTo(baseX + bodyW * 0.25, torsoBotY);
+    ctx.lineTo(baseX + bodyW * 0.05, torsoBotY - bodyH * 0.05);
+    ctx.lineTo(baseX - bodyW * 0.15, torsoBotY);
+    ctx.lineTo(baseX - bodyW / 2, torsoBotY - bodyH * 0.04);
+    ctx.closePath();
+    ctx.fill();
+
+    // รอยแผล/คราบเลือดบนตัว (ตำแหน่งคงที่ต่อซอมบี้ตาม woundSeed ไม่กระพริบเปลี่ยนทุกเฟรม)
+    let wSeed = z.woundSeed || 0;
+    ctx.fillStyle = "rgba(90,10,10,0.55)";
+    ctx.beginPath();
+    ctx.ellipse(baseX - bodyW * 0.15 + wSeed * bodyW * 0.3, torsoTopY + torsoH * (0.35 + wSeed * 0.3), bodyW * 0.22, bodyW * 0.14, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // แขนสองข้างยื่นมาข้างหน้า ท่าคลาสสิกของซอมบี้ (แขนเอียงห้อยไม่เท่ากันนิดหน่อยให้ดูไม่แข็งทื่อ)
+    ctx.fillStyle = armColor;
+    ctx.save();
+    ctx.translate(baseX - bodyW / 2 - 4 * scale, torsoTopY + torsoH * 0.15);
+    ctx.rotate(-0.12 + walkPhase * 0.05);
+    ctx.fillRect(-4 * scale, 0, 8 * scale, bodyH * 0.5);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(baseX + bodyW / 2 + 4 * scale, torsoTopY + torsoH * 0.15);
+    ctx.rotate(0.12 - walkPhase * 0.05);
+    ctx.fillRect(-4 * scale, 0, 8 * scale, bodyH * 0.5);
+    ctx.restore();
+
+    // หัวเอียงไปข้างหน้านิดหน่อย (ท่าคอตกแบบซอมบี้) + ตาสีแดง
+    let headX = baseX + bodyW * 0.12, headY = torsoTopY - headR * 0.5;
+    ctx.fillStyle = shadeColor(armColor, (tint - 0.5) * 10);
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+    // ผมยุ่ง ๆ ด้านบนหัว
+    ctx.fillStyle = shadeColor(legColor, -10);
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(headX + i * headR * 0.3, headY - headR * 0.9);
+      ctx.lineTo(headX + i * headR * 0.3 + headR * 0.08, headY - headR * 1.3);
+      ctx.lineTo(headX + i * headR * 0.3 + headR * 0.2, headY - headR * 0.85);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = "#cc2222";
+    ctx.beginPath();
+    ctx.arc(headX - headR * 0.35, headY, headR * 0.18, 0, Math.PI * 2);
+    ctx.arc(headX + headR * 0.35, headY, headR * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // หัวหน้าซอมบี้มีแถบเลือดเล็ก ๆ ลอยอยู่เหนือหัว ให้เห็นว่าเหลือกี่นัดถึงตาย
+    if (z.isBoss) {
+      let hpBarW = 60 * scale, hpBarH = 7 * scale;
+      let hpx = baseX - hpBarW / 2, hpy = baseY - bodyH - headR * 2.4;
+      ctx.fillStyle = "#300";
+      ctx.fillRect(hpx, hpy, hpBarW, hpBarH);
+      ctx.fillStyle = "#e33333";
+      ctx.fillRect(hpx, hpy, hpBarW * Math.max(0, z.hp / z.maxHp), hpBarH);
+    }
+  }
+
+  // ไอเทมเพิ่มเลือด: วงกลมขาวกากบาทแดง ลอยตุบ ๆ อยู่เหนือพื้นนิดหน่อย
+  function drawHealthPickup(hp) {
+    let cs = toCameraSpace(hp.x, hp.y);
+    let scale = focalLength / Math.max(cs.depth, 40); // กันไอเทมใหญ่คลุมทั้งจอตอนเข้าใกล้มาก ๆ
+    let bob = Math.sin(Date.now() / 300 + hp.x) * 6 * scale;
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale - 20 * scale + bob;
+    let r = 16 * scale;
+
+    // เหลือเวลาน้อยกว่า 2 วินาที เริ่มกระพริบเตือนว่าใกล้หายแล้ว
+    ctx.save();
+    if (hp.life < 60) {
+      ctx.globalAlpha = Math.floor(hp.life / 5) % 2 === 0 ? 1 : 0.25;
+    }
+
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(baseX, baseY - bob + 20 * scale, r * 0.7, r * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(baseX, baseY, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#d32f2f";
+    ctx.lineWidth = Math.max(1, r * 0.15);
+    ctx.stroke();
+    ctx.fillStyle = "#d32f2f";
+    ctx.fillRect(baseX - r * 0.15, baseY - r * 0.55, r * 0.3, r * 1.1);
+    ctx.fillRect(baseX - r * 0.55, baseY - r * 0.15, r * 1.1, r * 0.3);
+
+    ctx.restore();
+  }
+
+  // เอฟเฟกต์ตอนซอมบี้ตาย: ตัวล้มลงกับพื้นช่วงสั้น ๆ + เลือดกระเซ็นเป็นหยด ๆ + แอ่งเลือดติดพื้นอยู่นานกว่า
+  let deathAnims = [];
+  let bloodParticles = [];
+  let bloodPools = [];
+
+  function spawnBloodSplatter(x, y) {
+    for (let i = 0; i < 10; i++) {
+      let angle = Math.random() * Math.PI * 2;
+      let dist = 8 + Math.random() * 35;
+      bloodParticles.push({ x: x + Math.cos(angle) * dist, y: y + Math.sin(angle) * dist, size: 3 + Math.random() * 4, life: 35 });
+    }
+    bloodPools.push({ x: x, y: y, r: 22 + Math.random() * 12, life: 180 });
+  }
+
+  // แอ่งเลือดติดพื้น (วาดแบนราบไปกับพื้น เหมือนคราบจริง ๆ) ค่อย ๆ จางหายช่วงท้ายอายุ
+  function drawBloodPools() {
+    for (let bp of bloodPools) {
+      let cs = toCameraSpace(bp.x, bp.y);
+      if (cs.depth < nearClip) continue;
+      let scale = focalLength / cs.depth;
+      let bx = canvas.width / 2 + cs.lateral * scale;
+      let by = horizonY + cameraHeight * scale;
+      let alpha = bp.life < 40 ? (bp.life / 40) * 0.55 : 0.55;
+      ctx.fillStyle = "rgba(90,10,10," + alpha + ")";
+      ctx.beginPath();
+      ctx.ellipse(bx, by, bp.r * scale, bp.r * scale * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // หยดเลือดกระเซ็นเล็ก ๆ ตอนโดนยิงตาย จางหายเร็วกว่าแอ่งเลือด
+  function drawBloodParticles() {
+    for (let p of bloodParticles) {
+      let cs = toCameraSpace(p.x, p.y);
+      if (cs.depth < nearClip) continue;
+      let scale = focalLength / cs.depth;
+      let px = canvas.width / 2 + cs.lateral * scale;
+      let py = horizonY + cameraHeight * scale - 4 * scale;
+      ctx.fillStyle = "rgba(160,20,20," + (p.life / 35) + ")";
+      ctx.beginPath();
+      ctx.arc(px, py, p.size * scale * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ซอมบี้ล้มลงกับพื้นตอนตาย หมุนเอียงลงไปทีละนิดแล้วจางหายช่วงสุดท้าย (แทนที่จะหายวับไปทันที)
+  function drawDeathAnim(da) {
+    let cs = toCameraSpace(da.x, da.y);
+    if (cs.depth < nearClip) return;
+    let scale = focalLength / Math.max(cs.depth, 40); // กันตัวใหญ่คลุมทั้งจอตอนเข้าใกล้มาก ๆ
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale;
+    let progress = 1 - da.life / 20;
+    let fallAngle = Math.min(1, progress * 1.3) * (Math.PI * 0.42) * da.fallDir;
+    let alpha = da.life < 6 ? da.life / 6 : 1;
+    let sizeMul = da.isBoss ? 1.8 : 1;
+    let bodyH = 55 * scale * sizeMul, bodyW = 26 * scale * sizeMul, headR = 13 * scale * sizeMul;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(baseX, baseY);
+    ctx.rotate(fallAngle);
+    ctx.fillStyle = da.isBoss ? "#5a1f1f" : "#4d5a45";
+    ctx.fillRect(-bodyW / 2, -bodyH, bodyW, bodyH);
+    ctx.fillStyle = da.isBoss ? "#8a3a3a" : "#7c9270";
+    ctx.beginPath();
+    ctx.arc(0, -bodyH - headR * 0.6, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#cc2222";
+    ctx.beginPath();
+    ctx.arc(-headR * 0.35, -bodyH - headR * 0.6, headR * 0.18, 0, Math.PI * 2);
+    ctx.arc(headR * 0.35, -bodyH - headR * 0.6, headR * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // จัดเรียงวาดที่กำบัง/ซอมบี้/ไอเทมเพิ่มเลือด/แอนิเมชันล้มตายร่วมกัน ไกลสุดวาดก่อน ใกล้สุดวาดทีหลัง กันบังกันผิดที่
+  function drawWorldObjects() {
+    let renderList = [];
+    for (let z of zombies) {
+      if (!z.alive) continue;
+      let cs = toCameraSpace(z.x, z.y);
+      if (cs.depth > nearClip && cs.depth < 1600) renderList.push({ depth: cs.depth, draw: () => drawZombie(z) });
+    }
+    for (let c of coverSpots) {
+      let cs = toCameraSpace(c.x, c.y);
+      if (cs.depth > nearClip && cs.depth < 1600) renderList.push({ depth: cs.depth, draw: () => drawCover(c) });
+    }
+    for (let hp of healthPickups) {
+      if (!hp.active) continue;
+      let cs = toCameraSpace(hp.x, hp.y);
+      if (cs.depth > nearClip && cs.depth < 1600) renderList.push({ depth: cs.depth, draw: () => drawHealthPickup(hp) });
+    }
+    for (let da of deathAnims) {
+      let cs = toCameraSpace(da.x, da.y);
+      if (cs.depth > nearClip && cs.depth < 1600) renderList.push({ depth: cs.depth, draw: () => drawDeathAnim(da) });
+    }
+    renderList.sort((a, b) => b.depth - a.depth);
+    for (let item of renderList) item.draw();
+  }
+
+  // จุดแดงกระพริบตรงที่ยิงโดนซอมบี้ ให้เต้เห็นชัด ๆ ว่ายิงโดนแล้ว
+  let hitMarkers = [];
+  function drawHitMarkers() {
+    for (let hm of hitMarkers) {
+      let cs = toCameraSpace(hm.x, hm.y);
+      if (cs.depth < nearClip) continue;
+      let scale = focalLength / cs.depth;
+      let sx = canvas.width / 2 + cs.lateral * scale;
+      let sy = horizonY + cameraHeight * scale - 30 * scale;
+      ctx.fillStyle = "rgba(210,30,30," + (hm.timer / 12) + ")";
+      ctx.beginPath();
+      ctx.arc(sx, sy, 18 * scale * (1 + (12 - hm.timer) / 12), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ตัวหนังสือ "+1🪙" ลอยขึ้นค่อย ๆ จางหายไป ตรงจุดที่ฆ่าซอมบี้ได้
+  function drawLootPopups() {
+    for (let lp of lootPopups) {
+      let cs = toCameraSpace(lp.x, lp.y);
+      if (cs.depth < nearClip) continue;
+      let scale = focalLength / cs.depth;
+      let sx = canvas.width / 2 + cs.lateral * scale;
+      let sy = horizonY + cameraHeight * scale - 55 * scale - (40 - lp.timer) * 1.3;
+      ctx.fillStyle = "rgba(255,230,120," + (lp.timer / 40) + ")";
+      ctx.font = "bold " + Math.max(11, 16 * scale) + "px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(lp.text, sx, sy);
+    }
+  }
+
+  // คะแนนฆ่าซอมบี้ + เลเวลปัจจุบัน + ปืนที่ใช้อยู่ มุมบนซ้ายของจอ
+  function drawScore() {
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(14, 14, 250, 86);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 18px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("ฆ่าซอมบี้ไปแล้ว: " + zombiesKilled + " ตัว", 26, 38);
+    ctx.font = "15px sans-serif";
+    ctx.fillText("เลเวล " + level + " (" + killsThisLevel + "/" + killsPerLevel + ")", 26, 62);
+    ctx.fillStyle = "#cfe8ff";
+    ctx.fillText("อาวุธ: " + guns[equippedGun].name + " (กด B ซื้อปืน)", 26, 84);
+  }
+
+  // เหรียญ + เพชร มุมบนขวาของจอ
+  function drawCurrency() {
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(canvas.width - 190, 14, 176, 64);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#ffd54a";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText("🪙 " + coins, canvas.width - 24, 40);
+    ctx.fillStyle = "#7fd7ff";
+    ctx.fillText("💎 " + diamonds, canvas.width - 24, 66);
+  }
+
+  // ป้ายเตือนตอนหัวหน้าซอมบี้โผล่มา (ทุก ๆ เลเวลที่หาร 10 ลงตัว)
+  function drawBossAnnounce() {
+    if (bossAnnounceTimer <= 0) return;
+    ctx.fillStyle = "rgba(255,60,60," + Math.min(1, bossAnnounceTimer / 30) + ")";
+    ctx.font = "bold 38px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("⚠ หัวหน้าซอมบี้มาแล้ว! ⚠", canvas.width / 2, canvas.height * 0.22);
+  }
+
+  // ป้ายฉลองตอนปราบหัวหน้าซอมบี้สำเร็จ ได้ปืน RPG เป็นรางวัล
+  function drawBossRewardBanner() {
+    if (bossRewardBannerTimer <= 0) return;
+    ctx.fillStyle = "rgba(120,255,120," + Math.min(1, bossRewardBannerTimer / 30) + ")";
+    ctx.font = "bold 32px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ปราบหัวหน้าซอมบี้สำเร็จ! ได้ปืน RPG มาแล้ว 🚀", canvas.width / 2, canvas.height * 0.22);
+  }
+
+  // ร้านค้าซื้อปืน: กด B เปิด/ปิด ตอนเปิดโลกจะหยุดนิ่งเหมือนกดพอส
+  function drawShopScreen() {
+    if (!shopOpen) return;
+    ctx.fillStyle = "rgba(0,0,0,0.82)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ffd54a";
+    ctx.font = "bold 30px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ร้านค้าปืน", canvas.width / 2, 60);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("🪙 เหรียญ " + coins + "     💎 เพชร " + diamonds, canvas.width / 2, 90);
+
+    let startY = 130, rowH = 68;
+    for (let i = 0; i < guns.length; i++) {
+      let g = guns[i];
+      let y = startY + i * rowH;
+      ctx.fillStyle = i === equippedGun ? "rgba(255,215,60,0.22)" : "rgba(255,255,255,0.08)";
+      ctx.fillRect(canvas.width / 2 - 260, y - 30, 520, 56);
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(canvas.width / 2 - 260, y - 30, 520, 56);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 17px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText((i + 1) + ". " + g.name, canvas.width / 2 - 240, y - 4);
+      ctx.font = "13px sans-serif";
+      ctx.fillText("ดาเมจ " + g.dmg + "   ยิงเร็ว " + (30 / g.fireCooldown).toFixed(1) + " นัด/วิ", canvas.width / 2 - 240, y + 16);
+
+      ctx.textAlign = "right";
+      ctx.font = "bold 15px sans-serif";
+      let status, statusColor;
+      if (g.owned) {
+        status = i === equippedGun ? "กำลังใช้อยู่" : "กด " + (i + 1) + " เพื่อสวมใส่";
+        statusColor = "#8fd98f";
+      } else if (g.costType === "boss") {
+        status = "ปราบหัวหน้าซอมบี้เพื่อปลดล็อก 🚀"; // ซื้อด้วยเงินไม่ได้ ต้องเอาชนะบอสเท่านั้น
+        statusColor = "#999999";
+      } else {
+        status = "กด " + (i + 1) + " ซื้อ " + g.cost + (g.costType === "coin" ? " 🪙" : " 💎");
+        statusColor = "#ffd54a";
+      }
+      ctx.fillStyle = statusColor;
+      ctx.fillText(status, canvas.width / 2 + 240, y + 4);
+    }
+    ctx.fillStyle = "#cccccc";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("กด B เพื่อปิดร้านค้า", canvas.width / 2, startY + guns.length * rowH + 24);
+  }
+
+  // แถบพลังชีวิตของเต้ มุมล่างซ้ายของจอ ตามที่เต้ขอ
+  function drawHealthBar() {
+    let barW = 220, barH = 26;
+    let bx = 14, by = canvas.height - barH - 14;
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(bx - 6, by - 6, barW + 12, barH + 12);
+    ctx.fillStyle = "#3a1010";
+    ctx.fillRect(bx, by, barW, barH);
+    let hpRatio = Math.max(0, playerHP / playerMaxHP);
+    ctx.fillStyle = hpRatio > 0.5 ? "#4caf50" : hpRatio > 0.25 ? "#e0a030" : "#d32f2f";
+    ctx.fillRect(bx, by, barW * hpRatio, barH);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, barW, barH);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("พลังชีวิต " + Math.max(0, Math.round(playerHP)) + "/" + playerMaxHP, bx + barW / 2, by + barH * 0.68);
+  }
+
+  // จอแดงวาบตอนโดนซอมบี้กัด ให้รู้สึกเจ็บ
+  function drawDamageFlash() {
+    if (damageFlashTimer <= 0) return;
+    ctx.fillStyle = "rgba(200,0,0," + (damageFlashTimer / 20 * 0.35) + ")";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // ป้าย "เลเวลขึ้น!" เด้งกลางจอตอนไต่ระดับสำเร็จ
+  function drawLevelUpBanner() {
+    if (levelUpBannerTimer <= 0) return;
+    ctx.fillStyle = "rgba(255,215,60," + Math.min(1, levelUpBannerTimer / 20) + ")";
+    ctx.font = "bold 46px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("เลเวลขึ้น! เลเวล " + level, canvas.width / 2, canvas.height * 0.3);
+  }
+
+  // หน้าจอเกมโอเวอร์ตอนเลือดหมด กด R เพื่อเริ่มใหม่
+  function drawGameOverScreen() {
+    if (!gameOver) return;
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "bold 54px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("เกมโอเวอร์", canvas.width / 2, canvas.height * 0.42);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "22px sans-serif";
+    ctx.fillText("ฆ่าซอมบี้ไปทั้งหมด " + zombiesKilled + " ตัว (เลเวล " + level + ")", canvas.width / 2, canvas.height * 0.5);
+    ctx.fillText("กด R เพื่อเริ่มใหม่", canvas.width / 2, canvas.height * 0.58);
+  }
+
+  // เริ่มเกมใหม่ทั้งหมด: รีเซ็ตตำแหน่งเต้ เลือด เลเวล และซอมบี้ทั้งหมด
+  // (ตั้งใจไม่รีเซ็ตเหรียญ/เพชร/ปืนที่ซื้อไว้ ให้เต้เก็บของที่ซื้อแล้วไว้ได้ข้ามรอบ ตายแล้วไม่เสียของ)
+  function resetGame() {
+    playerX = 0;
+    playerY = 0;
+    playerAngle = 0;
+    playerHP = playerMaxHP;
+    level = 1;
+    killsThisLevel = 0;
+    killsPerLevel = level * 5;
+    zombiesKilled = 0;
+    zombieSpeed = 1.1;
+    zombies = [];
+    for (let i = 0; i < 5; i++) spawnNewZombie();
+    if (bossSpawned && !bossDefeated) spawnNewZombie(true); // ยังไม่เคยปราบหัวหน้าซอมบี้ได้ ให้เจอตัวเดิมอีกครั้งตอนเริ่มใหม่
+    hitMarkers = [];
+    healthPickups = [];
+    shellCasings = [];
+    smokePuffs = [];
+    deathAnims = [];
+    bloodParticles = [];
+    bloodPools = [];
+    damageFlashTimer = 0;
+    levelUpBannerTimer = 0;
+    gameOver = false;
+  }
+
+  // มือของเต้ถือปืนอยู่หน้าจอเสมอ (ไม่ขยับตามโลก) เหมือนกำลังถือปืนมองผ่านสายตาตัวเอง
+  // ตอนยิง ปืนจะกระดกขึ้นนิดหน่อย (recoilTimer) แล้วมีแสงแฟลชที่ปากกระบอกปืน (muzzleFlashTimer)
+  // แสงแฟลชปากกระบอกปืนรูปดาวกระจาย ดูมีพลังกว่าวงกลมธรรมดา
+  function drawMuzzleFlash(mx, my) {
+    let t = muzzleFlashTimer / 4;
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.fillStyle = "rgba(255,200,80," + (0.85 * t) + ")";
+    ctx.beginPath();
+    let spikes = 6, outerR = 20 * t + 6, innerR = 7;
+    for (let i = 0; i < spikes * 2; i++) {
+      let r = i % 2 === 0 ? outerR : innerR;
+      let a = (Math.PI / spikes) * i - Math.PI / 2;
+      let px = Math.cos(a) * r, py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255," + (0.9 * t) + ")";
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // มือของเต้ถือปืนแบบรายละเอียดเยอะขึ้น (สไลด์+เฟรม+ห่วงไก+ศูนย์เล็ง+แม็กกาซีน) ให้ดูสมจริงกว่าเดิม
+  // มุมมองแบบในภาพที่เต้ส่งมา: มองจากด้านหลังไหล่ เห็นแขนเสื้อหนังเต็มขอบล่างจอ มือกำด้าม
+  // ปืนชี้ตรงขึ้นบนกึ่งกลางจอ (เห็นด้านบน/ท้ายปืนเรียวลึกเข้าไปในจอ ไม่ใช่มุมมองด้านข้างแบบเดิม)
+  function drawGunView() {
+    let kick = recoilTimer > 0 ? recoilTimer * 1.2 : 0; // กระดกขึ้นตอนยิง แล้วค่อย ๆ กลับที่เดิม
+    let W = canvas.width, H = canvas.height;
+    let gun = guns[equippedGun];
+
+    // ปืนแกว่งเบา ๆ ตามจังหวะเดิน (เดินหน้า/ถอย/สไลด์ข้าง) ให้ดูเหมือนถือปืนจริง ไม่นิ่งทื่อ
+    let isMoving = moveForward || moveBackward || strafeLeft || strafeRight;
+    let swayX = isMoving ? Math.sin(Date.now() / 160) * 4 : 0;
+    let swayY = isMoving ? Math.abs(Math.sin(Date.now() / 160)) * 3 : 0;
+
+    ctx.save();
+    // ย้ายจุดอ้างอิงมากึ่งกลางจอ (x=0 คือกึ่งกลางจากนี้ไป) ปืนชี้ตรง ไม่เยื้องข้างแบบเดิม
+    ctx.translate(W * 0.5 + swayX, -kick + swayY);
+
+    // แขนเสื้อหนัง เต็มขอบล่างจอ ใช้เส้นโค้งแทนเส้นตรงให้ดูเป็นผ้าจริง ไม่ใช่สามเหลี่ยมแข็งทื่อ
+    let sleeveTopY = H * 0.62, sleeveBotY = H * 1.05;
+    let sleeveTopW = W * 0.095, sleeveBotW = W * 0.42;
+    let sleeveMidY = sleeveTopY + (sleeveBotY - sleeveTopY) * 0.5;
+    // ไล่เฉดแนวนอนด้วย เหมือนแขนทรงกระบอกโค้งมน (สว่างตรงกลาง มืดริมสองข้าง) ผสมกับแนวตั้ง (สว่างบน มืดล่าง)
+    let sleeveGradV = ctx.createLinearGradient(0, sleeveTopY, 0, sleeveBotY);
+    sleeveGradV.addColorStop(0, "#38373a");
+    sleeveGradV.addColorStop(1, "#0a0a0b");
+    ctx.fillStyle = sleeveGradV;
+    ctx.beginPath();
+    ctx.moveTo(-sleeveTopW, sleeveTopY);
+    ctx.bezierCurveTo(-sleeveTopW * 1.4, sleeveMidY, -sleeveBotW * 0.9, sleeveBotY - 50, -sleeveBotW, sleeveBotY);
+    ctx.lineTo(sleeveBotW, sleeveBotY);
+    ctx.bezierCurveTo(sleeveBotW * 0.9, sleeveBotY - 50, sleeveTopW * 1.4, sleeveMidY, sleeveTopW, sleeveTopY);
+    ctx.closePath();
+    ctx.fill();
+    // แถบสว่างกลางแขน จำลองผิวหนังโค้งมนรับแสง
+    let sleeveHighlight = ctx.createLinearGradient(-sleeveBotW * 0.3, 0, sleeveBotW * 0.3, 0);
+    sleeveHighlight.addColorStop(0, "rgba(255,255,255,0)");
+    sleeveHighlight.addColorStop(0.5, "rgba(255,255,255,0.06)");
+    sleeveHighlight.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sleeveHighlight;
+    ctx.beginPath();
+    ctx.moveTo(-sleeveTopW, sleeveTopY);
+    ctx.bezierCurveTo(-sleeveTopW * 1.4, sleeveMidY, -sleeveBotW * 0.9, sleeveBotY - 50, -sleeveBotW, sleeveBotY);
+    ctx.lineTo(sleeveBotW, sleeveBotY);
+    ctx.bezierCurveTo(sleeveBotW * 0.9, sleeveBotY - 50, sleeveTopW * 1.4, sleeveMidY, sleeveTopW, sleeveTopY);
+    ctx.closePath();
+    ctx.fill();
+
+    // รอยยับเสื้อหนัง: คู่เส้นเงา+ไฮไลต์ ให้ดูเป็นรอยพับนูนจริง ไม่ใช่แค่เส้นบาง ๆ
+    for (let i = 0; i < 5; i++) {
+      let t = 0.15 + (i / 5) * 0.78;
+      let y = sleeveTopY + (sleeveBotY - sleeveTopY) * t;
+      let halfW = (sleeveTopW + (sleeveBotW - sleeveTopW) * t) * 0.82;
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-halfW, y - 4);
+      ctx.quadraticCurveTo(0, y + 15, halfW, y - 4);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.1)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-halfW, y - 9);
+      ctx.quadraticCurveTo(0, y + 8, halfW, y - 9);
+      ctx.stroke();
+    }
+    // ปกข้อมือ (คั่นระหว่างแขนเสื้อกับมือ) เส้นตะเข็บจาง ๆ
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-sleeveTopW * 1.1, sleeveTopY + 6);
+    ctx.lineTo(sleeveTopW * 1.1, sleeveTopY + 6);
+    ctx.stroke();
+
+    // ตะเข็บเย็บกลางแขนเสื้อ (เส้นประ) + จุดผิวหนังเล็ก ๆ กระจายทั่วแขน ให้ดูเป็นพื้นผิวหนังจริง ไม่เรียบเป็นพลาสติก
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, sleeveTopY + 14);
+    ctx.lineTo(0, sleeveBotY - 20);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (let i = 0; i < 70; i++) {
+      let t = pseudoRandom(i * 3.1 + 500);
+      let y = sleeveTopY + (sleeveBotY - sleeveTopY) * t;
+      let halfW = (sleeveTopW + (sleeveBotW - sleeveTopW) * t) * 0.75;
+      let x = (pseudoRandom(i * 7.7 + 500) - 0.5) * 2 * halfW;
+      ctx.fillStyle = pseudoRandom(i * 5.3 + 500) > 0.5 ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.05)";
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // มือกำด้ามปืน: ฝ่ามือ + นิ้ว 4 นิ้วโค้งงอด้านบน + นิ้วโป้งด้านข้าง แทนก้อนวงรีเดียวแบบเดิม
+    let handY = H * 0.615;
+    let handW = W * 0.076, handH = H * 0.10;
+
+    // เงาใต้มือ ให้รู้สึกถึงน้ำหนักกดทับด้าม
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.beginPath();
+    ctx.ellipse(0, handY + handH * 0.75, handW * 0.95, handH * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ฝ่ามือ/หลังมือ (ฐาน) ไล่เฉดผิวให้มีมิติกลม ไม่แบน
+    let skinGrad = ctx.createRadialGradient(-handW * 0.2, handY - handH * 0.3, handW * 0.15, 0, handY, handW * 1.4);
+    skinGrad.addColorStop(0, "#e2ae7e");
+    skinGrad.addColorStop(1, "#a8734a");
+    ctx.fillStyle = skinGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, handY, handW, handH, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // นิ้วมือ 4 นิ้วโค้งงอกำรอบด้าม เรียงด้านบนของมือ แต่ละนิ้วมีรอยพับข้อนิ้ว + เล็บ + ร่องแยกนิ้วชัดเจน
+    for (let i = 0; i < 4; i++) {
+      let t = (i - 1.5) / 4;
+      let fx = t * handW * 1.9;
+      let fy = handY - handH * 0.78 + Math.abs(t) * handH * 0.22;
+
+      // ร่องเงาแยกนิ้ว วาดก่อนตัวนิ้ว ให้เห็นเป็นนิ้วแยกชิ้นจริง ๆ ไม่ติดเป็นก้อนเดียว
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath();
+      ctx.ellipse(fx + handW * 0.24, fy + handH * 0.05, handW * 0.06, handH * 0.3, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = i % 2 === 0 ? "#cf9c6e" : "#c69264";
+      ctx.beginPath();
+      ctx.ellipse(fx, fy, handW * 0.24, handH * 0.34, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // ข้อพับสองปล้อง (นิ้วจริงมีข้อ 2-3 ข้อ ไม่ใช่แค่เส้นเดียว)
+      ctx.strokeStyle = "rgba(0,0,0,0.28)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(fx - handW * 0.16, fy + handH * 0.02);
+      ctx.lineTo(fx + handW * 0.16, fy + handH * 0.02);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(fx - handW * 0.14, fy + handH * 0.18);
+      ctx.lineTo(fx + handW * 0.14, fy + handH * 0.18);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(fx, fy - handH * 0.1, handW * 0.12, Math.PI * 1.1, Math.PI * 1.7);
+      ctx.stroke();
+
+      // เล็บมือเล็ก ๆ ปลายนิ้ว
+      ctx.fillStyle = "rgba(255,240,225,0.55)";
+      ctx.beginPath();
+      ctx.ellipse(fx, fy - handH * 0.28, handW * 0.11, handH * 0.09, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // นิ้วโป้งวางทับด้านข้างด้าม เห็นชัดแบบในภาพอ้างอิงที่เต้ส่งมา (มีข้อพับ+เล็บเหมือนนิ้วอื่น)
+    ctx.save();
+    ctx.translate(handW * 0.9, handY - handH * 0.1);
+    ctx.rotate(-0.55);
+    ctx.fillStyle = "#d8a878";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, handW * 0.46, handH * 0.24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-handW * 0.15, -handH * 0.05);
+    ctx.lineTo(handW * 0.15, -handH * 0.05);
+    ctx.stroke();
+    // เล็บนิ้วโป้ง
+    ctx.fillStyle = "rgba(255,240,225,0.5)";
+    ctx.beginPath();
+    ctx.ellipse(-handW * 0.32, 0, handW * 0.1, handH * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ตัวปืนเรียวลึกเข้าไปในจอ (มองจากด้านหลัง) ไล่เฉดสว่างใกล้มือ มืดลงไปไกล ๆ
+    let gunTopY = H * 0.46, gunBotY = handY - H * 0.02; // เต้ขอให้สั้นลงอีก (0.09 -> 0.32 -> 0.46)
+    let gunBotW = W * 0.05, gunTopW = W * 0.02;
+    let gunGrad = ctx.createLinearGradient(0, gunTopY, 0, gunBotY);
+    gunGrad.addColorStop(0, gun.color);
+    gunGrad.addColorStop(1, gun.highlight);
+    ctx.fillStyle = gunGrad;
+    ctx.beginPath();
+    ctx.moveTo(-gunBotW, gunBotY);
+    ctx.lineTo(gunBotW, gunBotY);
+    ctx.lineTo(gunTopW, gunTopY);
+    ctx.lineTo(-gunTopW, gunTopY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-gunBotW, gunBotY);
+    ctx.lineTo(-gunTopW, gunTopY);
+    ctx.stroke();
+
+    // ศูนย์หลังตรงโคนปืนใกล้มือ
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(-W * 0.014, gunBotY - H * 0.025, W * 0.01, H * 0.02);
+    ctx.fillRect(W * 0.004, gunBotY - H * 0.025, W * 0.01, H * 0.02);
+
+    // ศูนย์หน้า + ปากกระบอกปืนที่ปลายสุด
+    let muzzleX = 0, muzzleY = gunTopY;
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(-W * 0.006, gunTopY, W * 0.012, H * 0.015);
+    ctx.fillStyle = "#000000";
+    ctx.beginPath();
+    ctx.arc(muzzleX, muzzleY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (muzzleFlashTimer > 0) drawMuzzleFlash(muzzleX, muzzleY);
+
+    ctx.restore();
+  }
+
+  // ปลอกกระสุนดีดออกจากปืนตอนยิง หมุนพลิ้วแล้วตกหายไป
+  let shellCasings = [];
+  function drawShellCasings() {
+    for (let sc of shellCasings) {
+      ctx.save();
+      ctx.translate(sc.x, sc.y);
+      ctx.rotate(sc.rot);
+      ctx.fillStyle = "#c9a227";
+      ctx.fillRect(-4, -2, 8, 4);
+      ctx.restore();
+    }
+  }
+
+  // ควันจาง ๆ ลอยออกจากปากกระบอกปืนหลังยิง ค่อย ๆ ขยายและจางหาย
+  let smokePuffs = [];
+  function drawSmokePuffs() {
+    for (let sp of smokePuffs) {
+      ctx.fillStyle = "rgba(200,200,200," + (sp.timer / 24 * 0.5) + ")";
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // เส้นลำแสงกระสุนวาบสั้น ๆ จากปากกระบอกไปยังเป้าเล็งตอนยิง
+  let tracerTimer = 0;
+  function drawTracer() {
+    if (tracerTimer <= 0) return;
+    ctx.strokeStyle = "rgba(255,255,200," + (tracerTimer / 3) + ")";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.5, canvas.height * 0.46);
+    ctx.lineTo(canvas.width / 2, horizonY);
+    ctx.stroke();
+  }
+
+  // จอสั่นเบา ๆ ตอนยิง ให้รู้สึกถึงแรงถีบของปืน
+  let shakeTimer = 0;
+
+  // เป้าเล็ง (crosshair) อยู่กึ่งกลางจอเสมอ บอกว่าเต้กำลังเล็งไปตรงไหน
+  function drawCrosshair() {
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    let cx = canvas.width / 2, cy = horizonY;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx - 4, cy);
+    ctx.moveTo(cx + 4, cy); ctx.lineTo(cx + 12, cy);
+    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy - 4);
+    ctx.moveTo(cx, cy + 4); ctx.lineTo(cx, cy + 12);
+    ctx.stroke();
+  }
+
+  // เสียงปืนทำเองสด ๆ ด้วย Web Audio API (ไม่ต้องมีไฟล์เสียงแยก) เหมือนเกมอื่น ๆ ของเต้
+  // เบราว์เซอร์ไม่ยอมให้เล่นเสียงจนกว่าเต้จะกดอะไรสักครั้งก่อน เลยสร้าง audioCtx ตอนยิงนัดแรก
+  let audioCtx = null;
+  let shotBuffer = null;
+  function initAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let len = Math.floor(audioCtx.sampleRate * 0.15);
+    shotBuffer = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    let data = shotBuffer.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2); // เสียงซ่า ดังวูบแรก ๆ แล้วเบาลงเร็ว ๆ เหมือนเสียงปัง
+    }
+  }
+  function playShotSound() {
+    let src = audioCtx.createBufferSource();
+    src.buffer = shotBuffer;
+    let filter = audioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 2200;
+    let gain = audioCtx.createGain();
+    gain.gain.value = 0.6;
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    src.start();
+  }
+
+  // ปุ่มยิงของเต้: กด Space ยิงได้ 1 นัด มีคูลดาวน์กันยิงถี่เกินไป (ไม่ใช่ยิงรัวอัตโนมัติ)
+  let shootCooldownTimer = 0; // มากกว่า 0 = ยิงนัดใหม่ไม่ได้ ต้องรอ
+  let muzzleFlashTimer = 0;   // แสงแฟลชปากกระบอกปืน แสดงกี่เฟรม
+  let recoilTimer = 0;        // ปืนกระดกขึ้นกี่เฟรมหลังยิง
+  function shoot() {
+    if (gameOver || shopOpen || shootCooldownTimer > 0) return;
+    let gun = guns[equippedGun];
+    initAudio();
+    playShotSound();
+    shootCooldownTimer = gun.fireCooldown; // ปืนแต่ละกระบอกยิงถี่ไม่เท่ากัน
+    muzzleFlashTimer = 4;
+    recoilTimer = 8;
+    tracerTimer = 3;
+    shakeTimer = 6;
+
+    // ปลอกกระสุนดีดออกจากช่องคีบปลอกทางขวาของมือ หมุนพลิ้วแล้วตกลง
+    shellCasings.push({
+      x: canvas.width * 0.56, y: canvas.height * 0.56,
+      vx: 2.5 + Math.random() * 1.5, vy: -3 - Math.random() * 2,
+      rot: 0, rotSpeed: (Math.random() - 0.5) * 0.6, timer: 26,
+    });
+    // ควันจาง ๆ ออกจากปากกระบอกปืน (ตอนนี้ปืนอยู่กึ่งกลางจอ ชี้ตรงขึ้นบนตามที่เต้ขอ)
+    smokePuffs.push({ x: canvas.width * 0.5, y: canvas.height * 0.46, r: 6, timer: 24 });
+
+    // เช็คว่ามีซอมบี้อยู่ตรงเป้าเล็งมั้ย เอาตัวที่อยู่ใกล้เส้นกึ่งกลางจอที่สุดและใกล้เต้ที่สุด
+    let bestZombie = null, bestDepth = Infinity;
+    for (let z of zombies) {
+      if (!z.alive) continue;
+      let cs = toCameraSpace(z.x, z.y);
+      if (cs.depth < nearClip || cs.depth > 1600) continue;
+      let scale = focalLength / cs.depth;
+      let screenLateral = cs.lateral * scale; // ห่างจากกึ่งกลางจอกี่พิกเซล
+      if (Math.abs(screenLateral) < 55 && cs.depth < bestDepth) {
+        if (isBlockedByCover(playerX, playerY, z.x, z.y)) continue; // มีที่กำบังบังไว้ ยิงทะลุไม่ได้
+        bestZombie = z;
+        bestDepth = cs.depth;
+      }
+    }
+    if (bestZombie) {
+      bestZombie.hp -= gun.dmg; // ดาเมจตามปืนที่ใช้อยู่ ซอมบี้ธรรมดา hp 1 ยังตายนัดเดียว หัวหน้าซอมบี้ต้องยิงหลายนัด
+      hitMarkers.push({ x: bestZombie.x, y: bestZombie.y, timer: 12 });
+      if (bestZombie.hp <= 0) killZombie(bestZombie);
+    }
+  }
+
+  // อัปเดตตำแหน่งของเต้ตามปุ่มที่กดอยู่ + นับถอยหลังตัวจับเวลาของปืน + ขยับซอมบี้ (เรียกทุกครั้งใน game loop)
+  function update() {
+    if (gameOver) {
+      draw();
+      return; // เกมโอเวอร์แล้ว หยุดขยับทุกอย่าง รอกด R
+    }
+    if (shopOpen) {
+      draw();
+      return; // ร้านค้าเปิดอยู่ โลกหยุดนิ่ง รอกด B ปิดร้าน
+    }
+
+    if (moveForward) {
+      playerX += Math.sin(playerAngle) * moveSpeed;
+      playerY -= Math.cos(playerAngle) * moveSpeed;
+    }
+    if (moveBackward) {
+      playerX -= Math.sin(playerAngle) * moveSpeed;
+      playerY += Math.cos(playerAngle) * moveSpeed;
+    }
+    // A/D สไลด์ไปด้านข้างตามที่เต้ขอ (แนวตั้งฉากกับทิศที่หันหน้าอยู่) แทนการเลี้ยว
+    if (strafeRight) {
+      playerX += Math.cos(playerAngle) * moveSpeed;
+      playerY += Math.sin(playerAngle) * moveSpeed;
+    }
+    if (strafeLeft) {
+      playerX -= Math.cos(playerAngle) * moveSpeed;
+      playerY -= Math.sin(playerAngle) * moveSpeed;
+    }
+    // เต้เดินทะลุที่กำบังหรือกำแพงไม่ได้
+    // กันเต้ไว้ห่างกว่าปกติ (60 แทน 14) ทั้งกำแพงเทาและลังไม้น้ำตาล เพราะยืนใกล้เกินไปทำให้กล้องมองทะลุได้ (บั๊กที่เต้เจอ)
+    let pResolved = resolveCoverCollision(playerX, playerY, 60);
+    pResolved = resolveWallCollision(pResolved.x, pResolved.y, 60);
+    playerX = pResolved.x;
+    playerY = pResolved.y;
+
+    // เดินไปเหยียบไอเทมเพิ่มเลือดแล้วเก็บได้อัตโนมัติ ไม่งั้นนับถอยหลัง 10 วินาทีแล้วหายไปเอง
+    for (let hp of healthPickups) {
+      if (!hp.active) continue;
+      let dx = playerX - hp.x, dy = playerY - hp.y;
+      if (Math.hypot(dx, dy) < 45) {
+        hp.active = false;
+        let before = playerHP;
+        playerHP = Math.min(playerMaxHP, playerHP + healAmount);
+        lootPopups.push({ x: hp.x, y: hp.y, timer: 40, text: "+" + Math.round(playerHP - before) + "❤️" });
+      } else {
+        hp.life--;
+        if (hp.life <= 0) hp.active = false; // หมดเวลา 10 วินาที ไม่มีใครมาเก็บ หายไปเอง
+      }
+    }
+    healthPickups = healthPickups.filter((hp) => hp.active);
+
+    if (shootCooldownTimer > 0) shootCooldownTimer--;
+    if (muzzleFlashTimer > 0) muzzleFlashTimer--;
+    if (recoilTimer > 0) recoilTimer--;
+    if (damageFlashTimer > 0) damageFlashTimer--;
+    if (levelUpBannerTimer > 0) levelUpBannerTimer--;
+    if (bossAnnounceTimer > 0) bossAnnounceTimer--;
+    if (bossRewardBannerTimer > 0) bossRewardBannerTimer--;
+    if (tracerTimer > 0) tracerTimer--;
+    if (shakeTimer > 0) shakeTimer--;
+
+    // ปลอกกระสุนที่ดีดออกมา ตกลงตามแรงโน้มถ่วงแล้วค่อย ๆ หายไป
+    for (let sc of shellCasings) {
+      sc.x += sc.vx; sc.y += sc.vy; sc.vy += 0.35; sc.rot += sc.rotSpeed; sc.timer--;
+    }
+    shellCasings = shellCasings.filter((sc) => sc.timer > 0);
+
+    // ควันปืนขยายตัวแล้วจางหาย
+    for (let sp of smokePuffs) {
+      sp.r += 0.6; sp.y -= 0.3; sp.timer--;
+    }
+    smokePuffs = smokePuffs.filter((sp) => sp.timer > 0);
+
+    // ซอมบี้แต่ละตัว: ถ้ายังไม่ตายก็เดินเข้าหาเต้ ถ้าตายแล้วก็นับถอยหลังรอเกิดใหม่
+    for (let z of zombies) {
+      if (z.alive) {
+        let dx = playerX - z.x, dy = playerY - z.y;
+        let dist = Math.hypot(dx, dy);
+        let stopDist = 55; // เข้าใกล้เต้แค่นี้ก็หยุด ไม่เดินทะลุตัวเต้
+        if (dist > stopDist) {
+          z.x += (dx / dist) * zombieSpeed;
+          z.y += (dy / dist) * zombieSpeed;
+        }
+        let zResolved = resolveCoverCollision(z.x, z.y, 14);
+        zResolved = resolveWallCollision(zResolved.x, zResolved.y, 14);
+        z.x = zResolved.x;
+        z.y = zResolved.y;
+
+        // ซอมบี้กัดเต้ถ้าเข้าใกล้พอ มีคูลดาวน์กันกัดถี่เกินไปทุกเฟรม
+        if (z.biteCooldown > 0) z.biteCooldown--;
+        if (dist <= stopDist + 5 && z.biteCooldown <= 0) {
+          playerHP -= 8;
+          z.biteCooldown = 45; // ประมาณ 1.3 วินาทีต่อการกัดหนึ่งครั้ง
+          damageFlashTimer = 20;
+          if (playerHP <= 0) {
+            playerHP = 0;
+            gameOver = true;
+          }
+        }
+      } else if (z.respawnTimer > 0) {
+        z.respawnTimer--;
+        if (z.respawnTimer <= 0) {
+          let p = randomZombieSpawnPoint();
+          z.x = p.x;
+          z.y = p.y;
+          z.alive = true;
+          z.biteCooldown = 0;
+        }
+      }
+    }
+
+    // จุดแดงตรงที่ยิงโดน ค่อย ๆ จางหายไป
+    for (let hm of hitMarkers) hm.timer--;
+    hitMarkers = hitMarkers.filter((hm) => hm.timer > 0);
+
+    // ตัวหนังสือ "+1🪙" ที่ลอยขึ้น ค่อย ๆ จางหายไปเหมือนกัน
+    for (let lp of lootPopups) lp.timer--;
+    lootPopups = lootPopups.filter((lp) => lp.timer > 0);
+
+    // แอนิเมชันล้มตาย + เลือดกระเซ็น + แอ่งเลือด ค่อย ๆ จางหายไปตามเวลาเหมือนกัน
+    for (let da of deathAnims) da.life--;
+    deathAnims = deathAnims.filter((da) => da.life > 0);
+    for (let p of bloodParticles) p.life--;
+    bloodParticles = bloodParticles.filter((p) => p.life > 0);
+    for (let bp of bloodPools) bp.life--;
+    bloodPools = bloodPools.filter((bp) => bp.life > 0);
+
+    draw();
+  }
+
+  // วาดภาพทุกอย่างของฉาก: ท้องฟ้า -> พื้น -> เส้นตาราง -> หมอกขอบฟ้า -> ที่กำบัง/ซอมบี้ -> จุดยิงโดน/ของรางวัล -> เป้าเล็ง -> มือถือปืน -> HUD -> ร้านค้า/เกมโอเวอร์
+  function draw() {
+    // จอสั่นเบา ๆ ตอนยิง (shakeTimer) ให้รู้สึกถึงแรงถีบ ค่อย ๆ หายไปตามเวลา
+    ctx.save();
+    if (shakeTimer > 0) {
+      ctx.translate((Math.random() - 0.5) * shakeTimer * 1.5, (Math.random() - 0.5) * shakeTimer * 1.5);
+    }
+
+    drawSky();
+    drawGround();
+    drawGroundGrid();
+    drawBloodPools();
+    drawWalls();
+    drawHaze();
+    drawWorldObjects();
+    drawBloodParticles();
+    drawHitMarkers();
+    drawLootPopups();
+    drawCrosshair();
+    drawTracer();
+    drawSmokePuffs();
+    drawGunView();
+    drawShellCasings();
+    drawDamageFlash();
+    drawScore();
+    drawCurrency();
+    drawHealthBar();
+    drawLevelUpBanner();
+    drawBossAnnounce();
+    drawBossRewardBanner();
+    drawShopScreen();
+    drawGameOverScreen();
+
+    ctx.restore();
+  }
+
+  draw();
+  setInterval(update, 30);
+</script>
+</body>
+</html>

@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>เกมรถแข่งของเต้</title>
+<style>
+  /* ทำให้หน้าเว็บอยู่ตรงกลางจอ ดูเรียบร้อย */
+  body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #222;
+  }
+
+  /* กรอบไม้รอบสนาม เหมือนเกมฟุตบอลของเต้ ตอนนี้กล้องเป็นมุมมอง FPV จริง ๆ แล้ว
+     (นั่งอยู่ในรถ) เลยไม่ต้องเอียงจอปลอม ๆ ด้วย CSS อีกต่อไป */
+  canvas {
+    display: block;
+    border: 8px solid #4a3728;
+    border-radius: 6px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+  }
+</style>
+</head>
+<body>
+
+<!-- canvas คือ "ผ้าใบ" ที่เราจะวาดรูปทุกอย่างของเกมลงไป -->
+<canvas id="game" width="1920" height="750"></canvas>
+
+<script>
+  // ดึง canvas มาใช้งาน และขอ "พู่กัน" (ctx) สำหรับวาดรูป
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // สนามเป็น "วงปิด" จริง ๆ แล้ว ขับวนรอบได้ครบรอบเหมือนสนามแข่งจริง
+  // trackPoints คือจุดหักเลี้ยวของสนาม เรียงต่อกันเป็นเส้นทาง แล้ววนกลับไปจุดแรกเอง (ปิดวง)
+  // สนามรูปวงรี (stadium oval) ปรับตามที่เต้ขอ: เพิ่มโค้งตัว S 3 โค้งบนทางตรงล่าง (แทนโค้งเดี่ยวเดิม)
+  // และเปลี่ยนโค้งปลายซ้าย-ขวาให้เป็นโค้งหักศอก (รัศมีแคบกว่าเดิมมาก ต้องเบรกแรง ๆ ถึงจะเข้าโค้งได้)
+  // (ในมุมมอง FPV พิกัดพวกนี้เป็นแค่ระยะในโลกเกม ไม่ได้ผูกกับขนาดจอ)
+  let trackPoints = [
+    { x: 300, y: 700 },    // จุดเริ่ม/จบ ต้นทางตรงด้านล่าง (ออกจากโค้งหักศอกซ้าย)
+
+    // โค้งตัว S ที่ 1: หักขึ้นก่อนแล้วหักลงสวนกลับ ครบเป็นรูปตัว S
+    { x: 600, y: 580 },
+    { x: 850, y: 700 },
+    { x: 1100, y: 820 },
+    { x: 1350, y: 700 },
+
+    // โค้งตัว S ที่ 2
+    { x: 1600, y: 580 },
+    { x: 1850, y: 700 },
+    { x: 2100, y: 820 },
+    { x: 2350, y: 700 },
+
+    // โค้งตัว S ที่ 3
+    { x: 2600, y: 580 },
+    { x: 2850, y: 700 },
+    { x: 3100, y: 820 },
+    { x: 3350, y: 700 },   // ออกจากโค้งตัว S ที่ 3 เข้าสู่โค้งหักศอกขวา
+
+    // โค้งหักศอกขวา: รัศมีแคบกว่าโค้งปลายเดิมมาก (เต้ขอเพิ่มโค้งหักศอก)
+    { x: 3410, y: 620 },
+    { x: 3430, y: 400 },   // จุดยอดโค้งหักศอกขวา
+    { x: 3410, y: 180 },
+    { x: 3350, y: 100 },   // ออกโค้ง เข้าทางตรงบน
+
+    { x: 2700, y: 250 },   // โค้งที่ 4 บนทางตรงบน
+    { x: 2450, y: 100 },   // กลับมาแนวทางตรง
+    { x: 1950, y: 250 },   // โค้งที่ 5 บนทางตรงบน
+    { x: 1700, y: 100 },   // กลับมาแนวทางตรง ยาวต่อเนื่องไปจนสุดทางซ้าย
+    { x: 300, y: 100 },    // ทางตรงด้านบน ไปสุดทางซ้าย ก่อนเข้าโค้งหักศอกซ้าย
+
+    // โค้งหักศอกซ้าย: รัศมีแคบเหมือนกับฝั่งขวา (เต้ขอโค้งหักศอกรวม 2 โค้ง)
+    { x: 240, y: 180 },
+    { x: 220, y: 400 },    // จุดยอดโค้งหักศอกซ้าย
+    { x: 240, y: 620 },    // ออกโค้ง วนกลับไปจุดเริ่ม/จบ
+  ];
+  let trackWidth = 290; // ถนนกว้างแค่ไหน (เต้ขอให้ถนนกว้างขึ้นอีก)
+
+  // สเกลของโลกเกมทั้งหมด เทียบกับตอนที่ครูปรับกล้อง/ต้นไม้/กำแพงให้พอดีครั้งแรก (ตอนนั้นถนนกว้าง 109)
+  // ทุกอย่างที่เป็น "ระยะในโลกเกม" (กล้อง ต้นไม้ กำแพง ฯลฯ) จะคูณด้วยตัวนี้ ให้สัดส่วนสมจริงเสมอ
+  // ไม่ว่าจะขยายถนนให้กว้าง/ใหญ่ขึ้นอีกแค่ไหนก็ตาม
+  let worldScale = trackWidth / 109;
+
+  // ทำให้มุมหักเลี้ยวของสนาม (trackPoints) ดูมนขึ้น ก่อนเอาไปสุ่มจุดวาดถนน
+  // วิธีนี้เรียกว่า Chaikin: ตัดมุมทุกมุมออกทีละนิด ทำซ้ำหลายรอบ จนเส้นตรงต่อกันกลายเป็นเส้นโค้งมน
+  // (ใช้แค่ตอนวาดภาพเท่านั้น ไม่กระทบตำแหน่งเกิดจริงของรถที่ยังอ้างอิง trackPoints เดิม)
+  function chaikinSmooth(points, iterations) {
+    let pts = points;
+    for (let iter = 0; iter < iterations; iter++) {
+      let newPts = [];
+      let n = pts.length;
+      for (let i = 0; i < n; i++) {
+        let p0 = pts[i];
+        let p1 = pts[(i + 1) % n];
+        newPts.push({ x: p0.x + (p1.x - p0.x) * 0.25, y: p0.y + (p1.y - p0.y) * 0.25 });
+        newPts.push({ x: p0.x + (p1.x - p0.x) * 0.75, y: p0.y + (p1.y - p0.y) * 0.75 });
+      }
+      pts = newPts;
+    }
+    return pts;
+  }
+  let smoothTrackPoints = chaikinSmooth(trackPoints, 8);
+
+  // หาขอบเขต (กว้าง-สูงสุด) ของสนาม เอาไว้ย่อแผนที่สนามให้พอดีกับกล่องแผนที่เล็ก ๆ มุมขวาบนจอ
+  let mapBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  function computeMapBounds() {
+    for (let p of trackPoints) {
+      if (p.x < mapBounds.minX) mapBounds.minX = p.x;
+      if (p.x > mapBounds.maxX) mapBounds.maxX = p.x;
+      if (p.y < mapBounds.minY) mapBounds.minY = p.y;
+      if (p.y > mapBounds.maxY) mapBounds.maxY = p.y;
+    }
+  }
+  computeMapBounds();
+
+  // กล่องแผนที่เล็ก ๆ มุมขวาบนจอ แสดงรูปสนามกับตำแหน่งรถ
+  let mapSize = 220;
+  let mapMargin = 20;
+  let mapBoxX = canvas.width - mapSize - mapMargin;
+  let mapBoxY = mapMargin;
+
+  // แปลงพิกัดในโลกเกม ให้กลายเป็นพิกัดบนจอภายในกล่องแผนที่ (ย่อส่วนให้พอดีกล่อง)
+  function mapToScreen(wx, wy) {
+    let w = mapBounds.maxX - mapBounds.minX;
+    let h = mapBounds.maxY - mapBounds.minY;
+    let pad = 16;
+    let usableW = mapSize - pad * 2;
+    let usableH = mapSize - pad * 2;
+    let scale = Math.min(usableW / w, usableH / h);
+    let offsetX = mapBoxX + pad + (usableW - w * scale) / 2;
+    let offsetY = mapBoxY + pad + (usableH - h * scale) / 2;
+    return {
+      x: offsetX + (wx - mapBounds.minX) * scale,
+      y: offsetY + (wy - mapBounds.minY) * scale,
+    };
+  }
+
+  // วาดกล่องแผนที่: พื้นหลังโปร่งแสง -> เส้นทางสนาม -> จุดสามเหลี่ยมบอกตำแหน่ง/ทิศทางรถ
+  function drawMiniMap() {
+    ctx.fillStyle = "rgba(10,10,20,0.55)";
+    ctx.fillRect(mapBoxX, mapBoxY, mapSize, mapSize);
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(mapBoxX, mapBoxY, mapSize, mapSize);
+
+    ctx.strokeStyle = "#f2c400";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    let first = mapToScreen(smoothTrackPoints[0].x, smoothTrackPoints[0].y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < smoothTrackPoints.length; i++) {
+      let p = mapToScreen(smoothTrackPoints[i].x, smoothTrackPoints[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // จุดสามเหลี่ยมบอกตำแหน่งรถคู่แข่ง (สีส้มทอง แยกจากลูกศรของเต้)
+    let rivalPoint = getRivalPoint();
+    let rivalDot = mapToScreen(rivalPoint.x, rivalPoint.y);
+    ctx.save();
+    ctx.translate(rivalDot.x, rivalDot.y);
+    ctx.rotate(rivalPoint.angle);
+    ctx.fillStyle = rivalColor;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    let carDot = mapToScreen(carPos.x, carPos.y);
+    ctx.save();
+    ctx.translate(carDot.x, carDot.y);
+    ctx.rotate(carAngle);
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // จอบอกความเร็วรถ มุมขวาล่างของจอ แบบหน้าปัดเข็มเหมือนรถยนต์จริง พร้อมตัวเลขดิจิตอลด้วย
+  let speedGaugeRadius = 72;
+  let speedGaugeMargin = 20;
+  let speedGaugeMaxKmh = 360; // ความเร็วสูงสุดที่หน้าปัดแสดงได้ (สัมพันธ์กับ maxSpeed*40)
+  let speedGaugeStartDeg = 135; // มุมเริ่ม (0 กม./ชม.) อยู่ทางซ้ายล่างของหน้าปัด
+  let speedGaugeSweepDeg = 270; // กวาดตามเข็มนาฬิกาไป 270 องศา ถึงมุมขวาล่าง (ความเร็วสูงสุด)
+
+  function drawSpeedometer() {
+    let cx = canvas.width - speedGaugeMargin - speedGaugeRadius;
+    let cy = canvas.height - speedGaugeMargin - speedGaugeRadius;
+
+    // พื้นหน้าปัด
+    ctx.beginPath();
+    ctx.arc(cx, cy, speedGaugeRadius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10,10,20,0.7)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // ขีดบอกระดับความเร็วรอบหน้าปัด (ทุก ๆ 40 กม./ชม.)
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 3;
+    let tickStep = 40;
+    for (let v = 0; v <= speedGaugeMaxKmh; v += tickStep) {
+      let deg = speedGaugeStartDeg + (v / speedGaugeMaxKmh) * speedGaugeSweepDeg;
+      let rad = (deg * Math.PI) / 180;
+      let outer = { x: cx + Math.cos(rad) * speedGaugeRadius, y: cy + Math.sin(rad) * speedGaugeRadius };
+      let inner = { x: cx + Math.cos(rad) * (speedGaugeRadius - 12), y: cy + Math.sin(rad) * (speedGaugeRadius - 12) };
+      ctx.beginPath();
+      ctx.moveTo(outer.x, outer.y);
+      ctx.lineTo(inner.x, inner.y);
+      ctx.stroke();
+    }
+
+    let speedKmh = Math.round(Math.abs(carSpeed) * 40); // แปลงความเร็วในเกมให้เป็นตัวเลข กม./ชม. ดูสนุก ๆ
+
+    // เข็มบอกความเร็ว หมุนตามสัดส่วนความเร็วปัจจุบัน
+    let clampedKmh = Math.min(speedGaugeMaxKmh, speedKmh);
+    let needleDeg = speedGaugeStartDeg + (clampedKmh / speedGaugeMaxKmh) * speedGaugeSweepDeg;
+    let needleRad = (needleDeg * Math.PI) / 180;
+    ctx.strokeStyle = "#ff3b3b";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(needleRad) * (speedGaugeRadius - 18), cy + Math.sin(needleRad) * (speedGaugeRadius - 18));
+    ctx.stroke();
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ตัวเลขดิจิตอลบอกความเร็ว อยู่ใต้จุดหมุนเข็ม
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillText(String(speedKmh), cx, cy + speedGaugeRadius * 0.5);
+    ctx.font = "11px sans-serif";
+    ctx.fillText("กม./ชม.", cx, cy + speedGaugeRadius * 0.5 + 16);
+
+    // เลขเกียร์ปัจจุบัน โชว์เป็นกล่องเล็ก ๆ ไว้เหนือหน้าปัด
+    ctx.fillStyle = "rgba(10,10,20,0.7)";
+    ctx.fillRect(cx - 22, cy - speedGaugeRadius - 34, 44, 30);
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - 22, cy - speedGaugeRadius - 34, 44, 30);
+    ctx.fillStyle = "#ffd400";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText("เกียร์" + currentGear, cx, cy - speedGaugeRadius - 12);
+  }
+
+  // จอบอกรอบเครื่องยนต์ (RPM) มุมซ้ายล่างของจอ แบบหน้าปัดเข็มเหมือนรถยนต์จริง มีโซนสีแดง (redline) ตรงรอบสูงสุด
+  let tachGaugeRadius = 72;
+  let tachGaugeMargin = 20;
+  let tachGaugeMaxRpm = 8000; // รอบเครื่องสูงสุดที่หน้าปัดแสดงได้
+  let tachRedlineRpm = 6500;  // รอบเครื่องตั้งแต่ตรงนี้ขึ้นไปถือว่า "แดง" ใกล้เปลี่ยนเกียร์
+  let tachGaugeStartDeg = 135;
+  let tachGaugeSweepDeg = 270;
+
+  function drawTachometer() {
+    let cx = tachGaugeMargin + tachGaugeRadius;
+    let cy = canvas.height - tachGaugeMargin - tachGaugeRadius;
+
+    // พื้นหน้าปัด
+    ctx.beginPath();
+    ctx.arc(cx, cy, tachGaugeRadius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10,10,20,0.7)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // โซนสีแดง (redline) เป็นเส้นโค้งหนา ๆ ตั้งแต่ tachRedlineRpm ถึงรอบสูงสุด
+    let redStartDeg = tachGaugeStartDeg + (tachRedlineRpm / tachGaugeMaxRpm) * tachGaugeSweepDeg;
+    let redEndDeg = tachGaugeStartDeg + tachGaugeSweepDeg;
+    ctx.strokeStyle = "#e53935";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(cx, cy, tachGaugeRadius - 4, (redStartDeg * Math.PI) / 180, (redEndDeg * Math.PI) / 180);
+    ctx.stroke();
+
+    // ขีดบอกระดับรอบเครื่องรอบหน้าปัด (ทุก ๆ 1000 รอบ)
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 3;
+    let tickStep = 1000;
+    for (let v = 0; v <= tachGaugeMaxRpm; v += tickStep) {
+      let deg = tachGaugeStartDeg + (v / tachGaugeMaxRpm) * tachGaugeSweepDeg;
+      let rad = (deg * Math.PI) / 180;
+      let outer = { x: cx + Math.cos(rad) * tachGaugeRadius, y: cy + Math.sin(rad) * tachGaugeRadius };
+      let inner = { x: cx + Math.cos(rad) * (tachGaugeRadius - 12), y: cy + Math.sin(rad) * (tachGaugeRadius - 12) };
+      ctx.beginPath();
+      ctx.moveTo(outer.x, outer.y);
+      ctx.lineTo(inner.x, inner.y);
+      ctx.stroke();
+    }
+
+    // engineRpmFraction (0-1) คือตำแหน่งในช่วงเกียร์ปัจจุบัน แปลงเป็นรอบเครื่องจริง (800 = รอบเดินเบา)
+    let rpm = Math.round(800 + engineRpmFraction * (tachGaugeMaxRpm - 800));
+    let needleDeg = tachGaugeStartDeg + (rpm / tachGaugeMaxRpm) * tachGaugeSweepDeg;
+    let needleRad = (needleDeg * Math.PI) / 180;
+    ctx.strokeStyle = rpm >= tachRedlineRpm ? "#ff3b3b" : "#4fc3f7";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(needleRad) * (tachGaugeRadius - 18), cy + Math.sin(needleRad) * (tachGaugeRadius - 18));
+    ctx.stroke();
+    ctx.fillStyle = "#4fc3f7";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ตัวเลขดิจิตอลบอกรอบเครื่อง (หน่วยพันรอบ/นาที แบบมาตรวัดรถจริง)
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillText((rpm / 1000).toFixed(1), cx, cy + tachGaugeRadius * 0.5);
+    ctx.font = "11px sans-serif";
+    ctx.fillText("รอบ x1000/นาที", cx, cy + tachGaugeRadius * 0.5 + 16);
+  }
+
+  // มุมมอง FPV วาดถนนจาก "จุดสุ่มถี่ ๆ" ตามเส้นทางสนาม (ที่มนแล้ว) แทนการลากเส้นทึบแบบมองจากบน
+  // แต่ละจุดเก็บตำแหน่งกึ่งกลางถนน (cx, cy) และทิศตั้งฉากกับถนน (perpAngle) ไว้หาขอบซ้าย-ขวา
+  let trackSamples = [];
+  let trackSampleGap = 20; // วางจุดทุก ๆ กี่หน่วย (ระยะจริงตามเส้นทาง ไม่ใช่ตามจำนวนจุดมน) ใช้ร่วมกับตำแหน่งรถคู่แข่งด้วย
+
+  function buildTrackSamples() {
+    trackSamples = [];
+    let n = smoothTrackPoints.length;
+    let carry = 0; // ระยะที่เหลือค้างจากช่วงก่อนหน้า สะสมไปเรื่อย ๆ จนครบ trackSampleGap ค่อยวางจุด
+    for (let i = 0; i < n; i++) {
+      let p0 = smoothTrackPoints[i];
+      let p1 = smoothTrackPoints[(i + 1) % n];
+      let segDx = p1.x - p0.x;
+      let segDy = p1.y - p0.y;
+      let segLen = Math.hypot(segDx, segDy);
+      if (segLen < 0.0001) continue; // ช่วงสั้นจิ๋วเกินไป (จากการตัดมุมซ้ำ ๆ) ข้ามไปเลย
+      let dirAngle = Math.atan2(segDy, segDx);
+      let perpAngle = dirAngle + Math.PI / 2;
+      let dist = carry;
+      while (dist < segLen) {
+        let t = dist / segLen;
+        trackSamples.push({
+          cx: p0.x + segDx * t,
+          cy: p0.y + segDy * t,
+          perpAngle: perpAngle,
+        });
+        dist += trackSampleGap;
+      }
+      carry = dist - segLen; // เศษระยะที่เกินมา ยกไปสะสมกับช่วงถัดไป
+    }
+  }
+  buildTrackSamples();
+
+  // หาจุดบนเส้นกึ่งกลางถนน (trackSamples) ที่อยู่ใกล้ตำแหน่ง (px, py) มากที่สุด
+  // ใช้เช็คว่ารถวิ่งออกนอกขอบถนนไปชนกำแพงหรือยัง
+  // ค้นหาแค่ "แถวใกล้ ๆ กับจุดที่เจอครั้งก่อน" เท่านั้น (ไม่ค้นหาทั้งสนาม) เพราะสนามวนโค้งมาใกล้ตัวเองได้
+  // (เช่นตรงฮาร์ปิน) ถ้าค้นหาทั้งสนามอาจพลาดไปเจอจุดของถนนอีกฝั่งที่อยู่ใกล้กันแต่คนละช่วง ทำให้รถเด้งหลุดสนาม
+  let lastNearestIndex = 0;
+  function findNearestSample(px, py) {
+    let n = trackSamples.length;
+    let searchRadius = 15;
+    let best = null, bestDist = Infinity, bestIndex = lastNearestIndex;
+    for (let d = -searchRadius; d <= searchRadius; d++) {
+      let idx = ((lastNearestIndex + d) % n + n) % n;
+      let s = trackSamples[idx];
+      let dx = px - s.cx, dy = py - s.cy;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        best = s;
+        bestIndex = idx;
+      }
+    }
+    lastNearestIndex = bestIndex;
+    return best;
+  }
+
+  // ต้นไม้ริมสนาม: วางเป็นจุด ๆ ห่างออกไปนอกขอบถนนทั้งสองฝั่ง ตามแนวเส้นทาง
+  let treeSpots = [];
+  function buildTreeSpots() {
+    treeSpots = [];
+    for (let i = 0; i < trackSamples.length; i += 5) {
+      let s = trackSamples[i];
+      let cos = Math.cos(s.perpAngle), sin = Math.sin(s.perpAngle);
+      let jitter = (i % 7) * 6 * worldScale; // ให้ห่างจากขอบถนนไม่เท่ากันทุกต้น ดูเป็นธรรมชาติ
+      let outward = (trackWidth + 16 * worldScale) / 2 + 40 * worldScale + jitter;
+      let height = (46 + (i % 5) * 6) * worldScale;
+      treeSpots.push({ wx: s.cx + cos * outward, wy: s.cy + sin * outward, height: height });
+      treeSpots.push({ wx: s.cx - cos * outward, wy: s.cy - sin * outward, height: height + 10 * worldScale });
+    }
+  }
+  buildTreeSpots();
+
+  // เสาไฟสปอตไลท์ริมสนาม (ให้บรรยากาศสนามแข่งตอนกลางคืน) ห่างกว่าต้นไม้ วางเป็นระยะห่าง ๆ
+  let floodlightSpots = [];
+  function buildFloodlightSpots() {
+    floodlightSpots = [];
+    for (let i = 0; i < trackSamples.length; i += 14) {
+      let s = trackSamples[i];
+      let cos = Math.cos(s.perpAngle), sin = Math.sin(s.perpAngle);
+      let outward = (trackWidth + 16 * worldScale) / 2 + 90 * worldScale;
+      let height = 140 * worldScale;
+      floodlightSpots.push({ wx: s.cx + cos * outward, wy: s.cy + sin * outward, height: height });
+      floodlightSpots.push({ wx: s.cx - cos * outward, wy: s.cy - sin * outward, height: height });
+    }
+  }
+  buildFloodlightSpots();
+
+  // ป้ายบอกโค้งล่วงหน้า (เหมือนป้ายลูกศรข้างสนามแข่งจริง) วิเคราะห์จากจุดหักเลี้ยวจริงของสนาม
+  // วางไว้ก่อนถึงโค้งแต่ละจุด ฝั่งนอกโค้ง พร้อมลูกศรชี้ทิศทางว่าโค้งซ้ายหรือขวา
+  let cornerSigns = [];
+  function buildCornerSigns() {
+    cornerSigns = [];
+    let n = trackPoints.length;
+    let leadDistance = 220 * worldScale; // วางป้ายไว้ก่อนถึงโค้งกี่หน่วย
+    let turnThreshold = 0.3; // มุมเลี้ยวต้องหักมากกว่านี้ (ประมาณ 17 องศา) ถึงจะนับว่าเป็นโค้ง
+    for (let i = 0; i < n; i++) {
+      let prev = trackPoints[(i - 1 + n) % n];
+      let cur = trackPoints[i];
+      let next = trackPoints[(i + 1) % n];
+      let prevDir = Math.atan2(cur.y - prev.y, cur.x - prev.x);
+      let nextDir = Math.atan2(next.y - cur.y, next.x - cur.x);
+      let turnAngle = nextDir - prevDir;
+      while (turnAngle > Math.PI) turnAngle -= Math.PI * 2;
+      while (turnAngle < -Math.PI) turnAngle += Math.PI * 2;
+      if (Math.abs(turnAngle) < turnThreshold) continue; // ทางตรงหรือโค้งนิดเดียว ไม่ต้องมีป้าย
+
+      let segLen = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+      let t = segLen > leadDistance ? 1 - leadDistance / segLen : 0;
+      let px = prev.x + (cur.x - prev.x) * t;
+      let py = prev.y + (cur.y - prev.y) * t;
+      let perpAngle = prevDir + Math.PI / 2;
+      let turnsRight = turnAngle > 0;
+      let side = turnsRight ? -1 : 1; // วางป้ายไว้ฝั่งนอกโค้ง
+      let offset = side * ((trackWidth + 16 * worldScale) / 2 + 30 * worldScale);
+      cornerSigns.push({
+        wx: px + Math.cos(perpAngle) * offset,
+        wy: py + Math.sin(perpAngle) * offset,
+        turnsRight: turnsRight,
+      });
+    }
+  }
+  buildCornerSigns();
+
+  // ไอเทมเพิ่มความเร็ว: จุดละ 2 ดวงอยู่ติดกันคนละฝั่งถนน ดาวฟ้า (playerOnly) เก็บได้แค่เต้ ดาวเหลืองเก็บได้แค่คู่แข่ง
+  // เก็บได้ครั้งเดียวต่อรอบ (พอวิ่งผ่านเส้นเริ่ม/จบครบรอบใหม่ ไอเทมทั้งหมดจะกลับมาให้เก็บได้อีกครั้ง)
+  let itemSpots = [];
+  let itemPickupRadius = 70 * worldScale; // ระยะที่ต้องเข้าใกล้ไอเทมแค่ไหนถึงจะเก็บได้ (ใช้ทั้งเต้และคู่แข่ง)
+  function buildItemSpots() {
+    itemSpots = [];
+    let pairFractions = [0.3, 0.7]; // จุดวางไอเทม 2 จุด แต่ละจุดมีดาวฟ้า+ดาวเหลืองอยู่ติดกัน (เต้ขอให้อยู่ข้างๆกัน)
+    let sideOffset = trackWidth / 2 - 20; // ระยะห่างจากกึ่งกลางถนน ให้ดาวสองสีอยู่คนละฝั่งถนนแต่จุดเดียวกัน
+    for (let f of pairFractions) {
+      let s = trackSamples[Math.floor(trackSamples.length * f)];
+      let ox = Math.cos(s.perpAngle) * sideOffset;
+      let oy = Math.sin(s.perpAngle) * sideOffset;
+      // ดาวฟ้าฝั่งหนึ่ง (playerOnly เก็บได้แค่เต้)
+      itemSpots.push({ cx: s.cx - ox, cy: s.cy - oy, active: true, playerOnly: true });
+      // ดาวเหลืองอีกฝั่ง ติดกัน (เก็บได้แค่คู่แข่ง เต้เก็บไม่ได้แล้วตามที่ขอ)
+      itemSpots.push({ cx: s.cx + ox, cy: s.cy + oy, active: true, playerOnly: false });
+    }
+  }
+  buildItemSpots();
+
+  // วาดดาวหมุน ๆ 1 ดวง ลอยอยู่เหนือพื้นถนนนิดหน่อย ณ ตำแหน่ง (wx, wy) ในโลกเกม
+  // glowRgb คือเลข r,g,b ของแสงเรืองรอบดาว (ไม่ใส่ปีกวงเล็บ เช่น "255,230,90")
+  function drawSpinningStarAt(wx, wy, fillColor, strokeColor, glowRgb) {
+    let cs = toCarSpace(wx, wy);
+    if (cs.depth < nearClip || cs.depth > 700 * worldScale) return;
+    let scale = focalLength / cs.depth;
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale - 30 * worldScale * scale; // ลอยเหนือพื้นนิดหน่อย
+    let r = 22 * worldScale * scale;
+
+    let glow = ctx.createRadialGradient(baseX, baseY, 0, baseX, baseY, r * 2);
+    glow.addColorStop(0, "rgba(" + glowRgb + ",0.9)");
+    glow.addColorStop(1, "rgba(" + glowRgb + ",0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(baseX, baseY, r * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    let spin = raceTimerMs * 0.004;
+    ctx.fillStyle = fillColor;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    ctx.beginPath();
+    for (let p = 0; p < 5; p++) {
+      let outerAng = spin + (p / 5) * Math.PI * 2;
+      let innerAng = outerAng + Math.PI / 5;
+      let ox = baseX + Math.cos(outerAng) * r, oy = baseY + Math.sin(outerAng) * r;
+      let ix = baseX + Math.cos(innerAng) * r * 0.45, iy = baseY + Math.sin(innerAng) * r * 0.45;
+      if (p === 0) ctx.moveTo(ox, oy); else ctx.lineTo(ox, oy);
+      ctx.lineTo(ix, iy);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // วาดไอเทมทั้งหมดที่ยังไม่ถูกเก็บ: ดาวสีทองหมุน ๆ (เก็บได้แค่คู่แข่งเท่านั้น เต้เก็บไม่ได้)
+  // ส่วนไอเทม playerOnly เป็นดาวสีฟ้า เก็บได้แค่เต้คนเดียว
+  function drawItems() {
+    for (let item of itemSpots) {
+      if (!item.active) continue;
+      if (item.playerOnly) {
+        drawSpinningStarAt(item.cx, item.cy, "#29b6f6", "#0d5c85", "140,220,255");
+      } else {
+        drawSpinningStarAt(item.cx, item.cy, "#ffd400", "#a86e00", "255,230,90");
+      }
+    }
+  }
+
+  // ผสมสี 2 สีเข้าด้วยกันตามสัดส่วน t (0 = สีแรกล้วน ๆ, 1 = สีที่สองล้วน ๆ)
+  // ใช้ทำ "หมอกไกล ๆ" ให้ถนนช่วงที่อยู่ไกลมาก ๆ ค่อย ๆ กลืนไปกับท้องฟ้า เหมือนสายตาคนจริง
+  function hexToRgb(hex) {
+    let h = hex.replace("#", "");
+    let num = parseInt(h, 16);
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+  }
+  function mixColor(hex1, hex2, t) {
+    let c1 = hexToRgb(hex1), c2 = hexToRgb(hex2);
+    let r = Math.round(c1.r + (c2.r - c1.r) * t);
+    let g = Math.round(c1.g + (c2.g - c1.g) * t);
+    let b = Math.round(c1.b + (c2.b - c1.b) * t);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+  let fogColor = "#3a2f4d"; // สีเดียวกับท้องฟ้าตรงเส้นขอบฟ้า (ธีมกลางคืน)
+
+  // แปลงจุดในโลกเกม ให้กลายเป็นระยะ "ไกล-ใกล้" (depth) และ "ซ้าย-ขวา" (lateral)
+  // เทียบกับรถ โดยหมุนกลับด้วย -carAngle
+  function toCarSpace(wx, wy) {
+    let dx = wx - carPos.x;
+    let dy = wy - carPos.y;
+    let depth = dx * Math.sin(carAngle) - dy * Math.cos(carAngle);
+    let lateral = dx * Math.cos(carAngle) + dy * Math.sin(carAngle);
+    return { depth: depth, lateral: lateral };
+  }
+
+  // ค่ากล้อง FPV: ผูกกับความกว้างถนนโดยตรง (สัดส่วนคงที่เสมอไม่ว่าถนนจะใหญ่แค่ไหน)
+  // เดิมกล้องอยู่สูงเกือบเท่าความกว้างถนนทั้งเส้น (สูงเกินจริงมาก) เลยรู้สึกเหมือนลอยอยู่ในอากาศ
+  // ตามที่เต้บอก ครูเลยลดกล้องให้เตี้ยลงมาก ๆ ใกล้พื้นถนนแบบนั่งอยู่ในรถแข่งจริง ๆ
+  let cameraHeight = trackWidth * 0.09; // กล้องอยู่สูงแค่ไหนจากพื้นถนน (เตี้ยลงมาก ให้รู้สึกนั่งอยู่ในรถ)
+  let focalLength = trackWidth * 2.5;   // ระยะเลนส์ (มากขึ้น = เหมือนซูมเข้า)
+  let horizonY = canvas.height * 0.42;  // เส้นขอบฟ้าอยู่ตรงไหนของจอ (พิกัดจอ ไม่ต้องผูกกับถนน)
+
+  // จุดที่อยู่ใกล้กล้องเกินไป (เกือบอยู่ตรงเดียวกับรถพอดี) ห้ามวาด เพราะยิ่งใกล้ยิ่งขยายภาพ
+  // ใหญ่มาก ๆ จนภาพเพี้ยนแตกเป็นเส้นพุ่งกระจาย (เหมือนซูมกล้องเข้าไปจนภาพระเบิด)
+  // ระยะนี้ถือว่าซ่อนอยู่ใต้ฝากระโปรงรถไปแล้วอยู่ดี เลยไม่ต้องวาดก็ไม่เสียอะไร
+  let nearClip = trackWidth * 0.15;
+
+  // ฉายจุดในโลกเกม ลงเป็นพิกัดบนจอแบบ perspective (ยิ่งไกลยิ่งเล็ก)
+  // ถ้าจุดอยู่ใกล้กล้องเกินไป (ใกล้กว่า nearClip) จะคืนค่า null
+  function project(wx, wy) {
+    let cs = toCarSpace(wx, wy);
+    if (cs.depth < nearClip) return null;
+    let scale = focalLength / cs.depth;
+    return {
+      x: canvas.width / 2 + cs.lateral * scale,
+      y: horizonY + cameraHeight * scale,
+      scale: scale,
+    };
+  }
+
+  // ดาวบนฟ้ายามค่ำคืน สุ่มตำแหน่งไว้ครั้งเดียวตอนเริ่มเกม จะได้ไม่กระพริบเปลี่ยนที่ทุกเฟรม
+  let stars = [];
+  function buildStars() {
+    stars = [];
+    for (let i = 0; i < 90; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * horizonY * 0.85,
+        r: 0.8 + Math.random() * 1.4,
+      });
+    }
+  }
+  buildStars();
+
+  // ตึกเมืองเป็นเงาดำริมขอบฟ้า มีหน้าต่างเรืองแสงสีเหลืองอุ่น ๆ (บรรยากาศสนามแข่งกลางเมืองตอนกลางคืน)
+  function drawSkyline() {
+    let buildingCount = 16;
+    let bw = canvas.width / buildingCount;
+    for (let i = 0; i < buildingCount; i++) {
+      let bx = i * bw;
+      let bh = 36 + ((i * 53) % 95);
+      ctx.fillStyle = "rgba(18,20,38,0.9)";
+      ctx.fillRect(bx, horizonY - bh, bw - 4, bh);
+      ctx.fillStyle = "rgba(255,214,120,0.85)";
+      for (let wy = horizonY - bh + 8; wy < horizonY - 6; wy += 11) {
+        for (let wx = bx + 6; wx < bx + bw - 10; wx += 11) {
+          if ((Math.floor(wx) + Math.floor(wy)) % 3 === 0) ctx.fillRect(wx, wy, 4, 6);
+        }
+      }
+    }
+  }
+
+  // ท้องฟ้ายามค่ำคืนกับพื้นหญ้า วาดเป็นพื้นหลังก่อนวาดถนนทุกครั้ง (ธีมสนามแข่งกลางคืนสไตล์สิงคโปร์)
+  function drawSkyAndGrass() {
+    let sky = ctx.createLinearGradient(0, 0, 0, horizonY);
+    sky.addColorStop(0, "#050814");
+    sky.addColorStop(0.7, "#141c3d");
+    sky.addColorStop(1, "#3a2f4d");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, horizonY);
+
+    // ดาวระยิบระยับ
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    for (let s of stars) {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    drawSkyline();
+
+    let grass = ctx.createLinearGradient(0, horizonY, 0, canvas.height);
+    grass.addColorStop(0, "#1f4d2a");
+    grass.addColorStop(1, "#0f2814");
+    ctx.fillStyle = grass;
+    ctx.fillRect(0, horizonY, canvas.width, canvas.height - horizonY);
+  }
+
+  // วาดต้นไม้ริมสนามทั้งหมด: ไล่จากไกลสุดไปใกล้สุดเหมือนกับถนน
+  function drawTrees() {
+    let visible = [];
+    for (let t of treeSpots) {
+      let cs = toCarSpace(t.wx, t.wy);
+      if (cs.depth < nearClip || cs.depth > 700 * worldScale) continue;
+      visible.push({ t: t, depth: cs.depth, lateral: cs.lateral });
+    }
+    visible.sort((a, b) => b.depth - a.depth);
+    for (let v of visible) {
+      let scale = focalLength / v.depth;
+      let baseX = canvas.width / 2 + v.lateral * scale;
+      let baseY = horizonY + cameraHeight * scale;
+      let h = v.t.height * scale;
+      let trunkW = 6 * scale, trunkH = h * 0.3;
+
+      // เงาใต้ต้นไม้ ทำให้ดูตั้งอยู่บนพื้นจริง ๆ ไม่ลอย
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.beginPath();
+      ctx.ellipse(baseX, baseY, trunkW * 2.2, trunkW * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#6b4423";
+      ctx.fillRect(baseX - trunkW / 2, baseY - trunkH, trunkW, trunkH);
+      ctx.fillStyle = "#2f8f3f";
+      ctx.beginPath();
+      ctx.ellipse(baseX, baseY - trunkH - h * 0.35, h * 0.32, h * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // วาดเสาไฟสปอตไลท์ทั้งหมด: ไล่จากไกลสุดไปใกล้สุดเหมือนต้นไม้
+  function drawFloodlights() {
+    let visible = [];
+    for (let f of floodlightSpots) {
+      let cs = toCarSpace(f.wx, f.wy);
+      if (cs.depth < nearClip || cs.depth > 900 * worldScale) continue;
+      visible.push({ f: f, depth: cs.depth, lateral: cs.lateral });
+    }
+    visible.sort((a, b) => b.depth - a.depth);
+    for (let v of visible) {
+      let scale = focalLength / v.depth;
+      let baseX = canvas.width / 2 + v.lateral * scale;
+      let baseY = horizonY + cameraHeight * scale;
+      let h = v.f.height * scale;
+
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = Math.max(1, h * 0.03);
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(baseX, baseY - h);
+      ctx.stroke();
+
+      let glow = ctx.createRadialGradient(baseX, baseY - h, 0, baseX, baseY - h, h * 0.6);
+      glow.addColorStop(0, "rgba(255,250,220,0.9)");
+      glow.addColorStop(1, "rgba(255,250,220,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(baseX, baseY - h, h * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#fffbe0";
+      ctx.beginPath();
+      ctx.arc(baseX, baseY - h, Math.max(2, h * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ป้ายซุ้มเหนือถนนตรงเส้นเริ่ม/จบ พร้อมข้อความชื่อเต้ เหมือนป้าย "SINGAPORE" ในสนามแข่งจริง
+  function drawStartGantry() {
+    let s = trackSamples[0];
+    let cos0 = Math.cos(s.perpAngle), sin0 = Math.sin(s.perpAngle);
+    let halfKerbGantry = (trackWidth + 16 * worldScale) / 2;
+    let poleOffset = halfKerbGantry + 20 * worldScale;
+    let poleHeight = 130 * worldScale;
+    let leftGround = project(s.cx - cos0 * poleOffset, s.cy - sin0 * poleOffset);
+    let rightGround = project(s.cx + cos0 * poleOffset, s.cy + sin0 * poleOffset);
+    if (!leftGround || !rightGround) return; // ป้ายอยู่นอกระยะมองเห็นตอนนี้ ไม่ต้องวาด
+
+    let leftTop = { x: leftGround.x, y: leftGround.y - poleHeight * leftGround.scale };
+    let rightTop = { x: rightGround.x, y: rightGround.y - poleHeight * rightGround.scale };
+
+    ctx.strokeStyle = "#555";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(leftGround.x, leftGround.y);
+    ctx.lineTo(leftTop.x, leftTop.y);
+    ctx.moveTo(rightGround.x, rightGround.y);
+    ctx.lineTo(rightTop.x, rightTop.y);
+    ctx.stroke();
+
+    let bannerH = Math.max(10, leftGround.scale * 34 * worldScale);
+    fillScreenQuad([
+      { x: leftTop.x, y: leftTop.y + bannerH / 2 },
+      { x: rightTop.x, y: rightTop.y + bannerH / 2 },
+      { x: rightTop.x, y: rightTop.y - bannerH / 2 },
+      { x: leftTop.x, y: leftTop.y - bannerH / 2 },
+    ], "#e23b5e");
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold " + Math.max(8, bannerH * 0.6) + "px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TAE", (leftTop.x + rightTop.x) / 2, (leftTop.y + rightTop.y) / 2);
+  }
+
+  // วาดป้ายบอกโค้งล่วงหน้าทั้งหมด: ไล่จากไกลสุดไปใกล้สุดเหมือนต้นไม้
+  function drawCornerSigns() {
+    let visible = [];
+    for (let sgn of cornerSigns) {
+      let cs = toCarSpace(sgn.wx, sgn.wy);
+      if (cs.depth < nearClip || cs.depth > 700 * worldScale) continue;
+      visible.push({ sgn: sgn, depth: cs.depth, lateral: cs.lateral });
+    }
+    visible.sort((a, b) => b.depth - a.depth);
+    for (let v of visible) {
+      let scale = focalLength / v.depth;
+      let baseX = canvas.width / 2 + v.lateral * scale;
+      let baseY = horizonY + cameraHeight * scale;
+      let postH = 40 * worldScale * scale;
+      let boardW = 46 * worldScale * scale, boardH = 34 * worldScale * scale;
+      let boardY = baseY - postH - boardH / 2;
+
+      // เสาป้าย
+      ctx.strokeStyle = "#444";
+      ctx.lineWidth = Math.max(1, boardW * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(baseX, baseY - postH);
+      ctx.stroke();
+
+      // ป้ายสีเหลือง ขอบดำ
+      ctx.fillStyle = "#f2c400";
+      ctx.fillRect(baseX - boardW / 2, boardY - boardH / 2, boardW, boardH);
+      ctx.strokeStyle = "#222";
+      ctx.lineWidth = Math.max(1, boardW * 0.04);
+      ctx.strokeRect(baseX - boardW / 2, boardY - boardH / 2, boardW, boardH);
+
+      // ลูกศรดำชี้ทิศทางว่าโค้งซ้ายหรือขวา
+      ctx.fillStyle = "#111";
+      ctx.beginPath();
+      if (v.sgn.turnsRight) {
+        ctx.moveTo(baseX - boardW * 0.25, boardY - boardH * 0.3);
+        ctx.lineTo(baseX - boardW * 0.25, boardY + boardH * 0.3);
+        ctx.lineTo(baseX + boardW * 0.25, boardY);
+      } else {
+        ctx.moveTo(baseX + boardW * 0.25, boardY - boardH * 0.3);
+        ctx.lineTo(baseX + boardW * 0.25, boardY + boardH * 0.3);
+        ctx.lineTo(baseX - boardW * 0.25, boardY);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // วาดรูปสี่เหลี่ยมคางหมู 1 ชิ้นจากจุดในโลกเกม 4 มุม (ฉายลงจอเองในนี้)
+  function fillWorldQuad(worldPoints, color) {
+    let screenPoints = [];
+    for (let p of worldPoints) {
+      let sp = project(p.x, p.y);
+      if (!sp) return; // มุมไหนอยู่หลังกล้อง ข้ามรูปนี้ไปเลย
+      screenPoints.push(sp);
+    }
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+    for (let i = 1; i < screenPoints.length; i++) ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // เหมือน fillWorldQuad แต่รับพิกัดบนจอที่คำนวณไว้แล้วโดยตรง (ใช้ตอนวาดกำแพงกันชนที่ "ยกสูง" จากพื้น)
+  function fillScreenQuad(screenPoints, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+    for (let i = 1; i < screenPoints.length; i++) ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // วาดกำแพงกันชนแดง-ขาว 1 ช่วง ริมถนน (ยกสูงจากพื้นเป็นกำแพงจริง ไม่ใช่แค่ทาสีบนพื้น)
+  function fillBarrierQuad(s0, cos0, sin0, s1, cos1, sin1, offset, worldHeight, color) {
+    let g0 = project(s0.cx + cos0 * offset, s0.cy + sin0 * offset);
+    let g1 = project(s1.cx + cos1 * offset, s1.cy + sin1 * offset);
+    if (!g0 || !g1) return;
+    let top0 = { x: g0.x, y: g0.y - worldHeight * g0.scale };
+    let top1 = { x: g1.x, y: g1.y - worldHeight * g1.scale };
+    fillScreenQuad([g0, g1, top1, top0], color);
+  }
+
+  // ช่วงถนนตรงเส้นเริ่ม/จบ วาดเป็นลายตาหมากรุกแทนยางมะตอยธรรมดา
+  let checkerSegmentCount = Math.round(2 * worldScale);
+  let checkerLateralBins = 6;
+
+  // วาดถนนทั้งหมดแบบ FPV: เรียงจากไกลสุดไปใกล้สุดแล้ววาดตามลำดับ (รูปใกล้ทับรูปไกล)
+  function drawTrackFPV() {
+    let halfWidth = trackWidth / 2;
+    let halfKerb = (trackWidth + 16 * worldScale) / 2;
+    let n = trackSamples.length;
+    let maxRenderDepth = 900 * worldScale;
+    let fogDistance = 850 * worldScale;
+
+    // หาช่วงถนนที่น่าจะเห็นได้ (อยู่หน้ากล้อง และไม่ไกลเกินไป)
+    let visibleSegments = [];
+    for (let i = 0; i < n; i++) {
+      let s0 = trackSamples[i];
+      let s1 = trackSamples[(i + 1) % n];
+      let d0 = toCarSpace(s0.cx, s0.cy).depth;
+      let d1 = toCarSpace(s1.cx, s1.cy).depth;
+      if (d0 < nearClip || d1 < nearClip) continue; // ใกล้กล้องเกินไป ข้ามไป (กันภาพระเบิด)
+      if (d0 > maxRenderDepth || d1 > maxRenderDepth) continue; // ไกลเกินไป ข้ามไป (กันสนามทั้งวงมาซ้อนกัน)
+      visibleSegments.push({ i: i, avgDepth: (d0 + d1) / 2 });
+    }
+    visibleSegments.sort((a, b) => b.avgDepth - a.avgDepth); // ไกลสุดก่อน ใกล้สุดวาดทับทีหลัง
+
+    for (let seg of visibleSegments) {
+      let i = seg.i;
+      let s0 = trackSamples[i];
+      let s1 = trackSamples[(i + 1) % n];
+      let cos0 = Math.cos(s0.perpAngle), sin0 = Math.sin(s0.perpAngle);
+      let cos1 = Math.cos(s1.perpAngle), sin1 = Math.sin(s1.perpAngle);
+
+      // ยิ่งไกลยิ่งกลืนเข้ากับสีท้องฟ้า เหมือนหมอกไกล ๆ ทำให้ดูมีระยะลึกสมจริงขึ้น
+      let fogT = Math.min(1, seg.avgDepth / fogDistance);
+
+      // หญ้าลายทางตัดสลับเข้ม-อ่อน เหมือนสนามจริงที่ตัดหญ้าเป็นแนว วาดก่อนสุด (กว้างออกไปทั้งสองข้าง)
+      let grassStripeColor = mixColor(i % 2 === 0 ? "#1f4d2a" : "#173d20", fogColor, fogT);
+      // ให้แถบหญ้าแคบพอประมาณ (ไม่กว้างเกินไป) เพราะถ้าหญ้าใกล้ ๆ รถกว้างมากไป ตอนรถอยู่ใกล้ทางโค้ง
+      // มุมมองมันจะขยายจนแถบหญ้านั้นบังถนนช่วงที่อยู่ไกลออกไปได้ (ภาพซ้อนกันผิดเพราะไม่มีระบบเช็คความลึกจริง)
+      let grassOuter = halfKerb + 70 * worldScale;
+      fillWorldQuad([
+        { x: s0.cx - cos0 * grassOuter, y: s0.cy - sin0 * grassOuter },
+        { x: s0.cx - cos0 * halfKerb, y: s0.cy - sin0 * halfKerb },
+        { x: s1.cx - cos1 * halfKerb, y: s1.cy - sin1 * halfKerb },
+        { x: s1.cx - cos1 * grassOuter, y: s1.cy - sin1 * grassOuter },
+      ], grassStripeColor);
+      fillWorldQuad([
+        { x: s0.cx + cos0 * halfKerb, y: s0.cy + sin0 * halfKerb },
+        { x: s0.cx + cos0 * grassOuter, y: s0.cy + sin0 * grassOuter },
+        { x: s1.cx + cos1 * grassOuter, y: s1.cy + sin1 * grassOuter },
+        { x: s1.cx + cos1 * halfKerb, y: s1.cy + sin1 * halfKerb },
+      ], grassStripeColor);
+
+      // ขอบ kerb (แดง-ขาวสลับกันไปตามจุด) กว้างกว่าถนนจริงเล็กน้อย วาดก่อน
+      let kerbColor = mixColor(i % 2 === 0 ? "#e53935" : "#f5f0e6", fogColor, fogT);
+      fillWorldQuad([
+        { x: s0.cx - cos0 * halfKerb, y: s0.cy - sin0 * halfKerb },
+        { x: s0.cx + cos0 * halfKerb, y: s0.cy + sin0 * halfKerb },
+        { x: s1.cx + cos1 * halfKerb, y: s1.cy + sin1 * halfKerb },
+        { x: s1.cx - cos1 * halfKerb, y: s1.cy - sin1 * halfKerb },
+      ], kerbColor);
+
+      // กำแพงกันชนแดง-ขาว ยกสูงจากพื้นเล็กน้อย อยู่ถัดจากขอบ kerb ออกไปทั้งสองฝั่ง
+      let barrierColor = mixColor(Math.floor(i / 2) % 2 === 0 ? "#d6d6d6" : "#c0392b", fogColor, fogT);
+      fillBarrierQuad(s0, cos0, sin0, s1, cos1, sin1, -(halfKerb + 16 * worldScale), 18 * worldScale, barrierColor);
+      fillBarrierQuad(s0, cos0, sin0, s1, cos1, sin1, halfKerb + 16 * worldScale, 18 * worldScale, barrierColor);
+
+      // ยางมะตอยทับตรงกลาง แคบกว่า kerb (หรือลายตาหมากรุกตรงเส้นเริ่ม/จบ)
+      if (i < checkerSegmentCount) {
+        for (let bin = 0; bin < checkerLateralBins; bin++) {
+          let t0 = -halfWidth + (trackWidth * bin) / checkerLateralBins;
+          let t1 = -halfWidth + (trackWidth * (bin + 1)) / checkerLateralBins;
+          let checkerColor = mixColor((bin + i) % 2 === 0 ? "#111111" : "#f5f0e6", fogColor, fogT);
+          fillWorldQuad([
+            { x: s0.cx + cos0 * t0, y: s0.cy + sin0 * t0 },
+            { x: s0.cx + cos0 * t1, y: s0.cy + sin0 * t1 },
+            { x: s1.cx + cos1 * t1, y: s1.cy + sin1 * t1 },
+            { x: s1.cx + cos1 * t0, y: s1.cy + sin1 * t0 },
+          ], checkerColor);
+        }
+      } else {
+        fillWorldQuad([
+          { x: s0.cx - cos0 * halfWidth, y: s0.cy - sin0 * halfWidth },
+          { x: s0.cx + cos0 * halfWidth, y: s0.cy + sin0 * halfWidth },
+          { x: s1.cx + cos1 * halfWidth, y: s1.cy + sin1 * halfWidth },
+          { x: s1.cx - cos1 * halfWidth, y: s1.cy - sin1 * halfWidth },
+        ], mixColor("#2b2b2e", fogColor, fogT));
+
+        // เส้นแบ่งกลางถนนสีขาวแบบเส้นประ ให้รู้สึกถึงความเร็วตอนขับ
+        if (Math.floor(i / 2) % 2 === 0) {
+          let centerHalf = 4 * worldScale;
+          fillWorldQuad([
+            { x: s0.cx - cos0 * centerHalf, y: s0.cy - sin0 * centerHalf },
+            { x: s0.cx + cos0 * centerHalf, y: s0.cy + sin0 * centerHalf },
+            { x: s1.cx + cos1 * centerHalf, y: s1.cy + sin1 * centerHalf },
+            { x: s1.cx - cos1 * centerHalf, y: s1.cy - sin1 * centerHalf },
+          ], mixColor("#f5f0e6", fogColor, fogT));
+        }
+      }
+    }
+  }
+
+  // รถคู่แข่ง (AI): วาดเป็นรูปรถมองจากด้านหลัง (บิลบอร์ดแบนที่หันหาเสมอ) ณ ตำแหน่งบนเส้นทางตอนนี้
+  // วาดต่อจากถนน (ทับถนนได้) แต่ยังไม่ทับฝากระโปรง/HUD เพราะวาดก่อนส่วนนั้น
+  function drawRivalCar() {
+    let point = getRivalPoint();
+    let cs = toCarSpace(point.x, point.y);
+    if (cs.depth < nearClip || cs.depth > 700 * worldScale) return; // อยู่หลังกล้องหรือไกลเกินไป ไม่ต้องวาด
+    let scale = focalLength / cs.depth;
+    let baseX = canvas.width / 2 + cs.lateral * scale;
+    let baseY = horizonY + cameraHeight * scale;
+
+    // รถ F1 ล้อจะกว้างกว่าตัวถังตรงกลางมาก (ตัวถังเรียวแคบ) ต่างจากรถทั่วไป
+    let trackW = 52 * worldScale * scale;  // ระยะห่างล้อซ้าย-ขวา (เต้ขอให้เล็กลงกว่าเดิม)
+    let wheelR = 10 * worldScale * scale;  // รัศมีล้อหลัง
+    let bodyW = 22 * worldScale * scale;   // ความกว้างตัวถังตรงกลาง (engine cover)
+    let bodyH = 17 * worldScale * scale;   // ความสูงตัวถังท้ายรถ
+    let wingH = 6.5 * worldScale * scale;  // ความหนาปีกหลัง
+    let wingY = baseY - bodyH - 18 * worldScale * scale; // ปีกหลังยกสูงกว่าตัวถัง มีเสาค้ำ
+
+    // เงาใต้รถ ให้ดูตั้งอยู่บนพื้นถนนจริง ๆ
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath();
+    ctx.ellipse(baseX, baseY, trackW * 0.6, trackW * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ล้อหลังสองข้าง โผล่ออกมานอกตัวถังชัดเจนแบบรถ F1 จริง
+    ctx.fillStyle = "#161616";
+    ctx.beginPath();
+    ctx.ellipse(baseX - trackW / 2, baseY - wheelR, wheelR * 0.55, wheelR, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(baseX + trackW / 2, baseY - wheelR, wheelR * 0.55, wheelR, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#999";
+    ctx.beginPath();
+    ctx.arc(baseX - trackW / 2, baseY - wheelR, wheelR * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(baseX + trackW / 2, baseY - wheelR, wheelR * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ดิฟฟิวเซอร์ท้ายรถ (สีเข้ม เอียงลงใต้ตัวถัง)
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.moveTo(baseX - bodyW / 2, baseY);
+    ctx.lineTo(baseX + bodyW / 2, baseY);
+    ctx.lineTo(baseX + bodyW * 0.3, baseY - bodyH * 0.25);
+    ctx.lineTo(baseX - bodyW * 0.3, baseY - bodyH * 0.25);
+    ctx.closePath();
+    ctx.fill();
+
+    // ตัวถังท้ายรถ แคบกว่าระยะล้อมาก เรียวขึ้นด้านบน (engine cover)
+    ctx.fillStyle = rivalColor;
+    ctx.beginPath();
+    ctx.moveTo(baseX - bodyW / 2, baseY - bodyH * 0.25);
+    ctx.lineTo(baseX + bodyW / 2, baseY - bodyH * 0.25);
+    ctx.lineTo(baseX + bodyW * 0.28, baseY - bodyH);
+    ctx.lineTo(baseX - bodyW * 0.28, baseY - bodyH);
+    ctx.closePath();
+    ctx.fill();
+
+    // ไฟท้ายเล็ก ๆ สีแดงตรงกลางตัวถัง
+    ctx.fillStyle = "#ff3b3b";
+    ctx.fillRect(baseX - bodyW * 0.15, baseY - bodyH * 0.85, bodyW * 0.3, bodyH * 0.15);
+
+    // เสาค้ำปีกหลังสองต้น
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = Math.max(1, wingH * 0.25);
+    ctx.beginPath();
+    ctx.moveTo(baseX - bodyW * 0.22, baseY - bodyH);
+    ctx.lineTo(baseX - bodyW * 0.22, wingY + wingH / 2);
+    ctx.moveTo(baseX + bodyW * 0.22, baseY - bodyH);
+    ctx.lineTo(baseX + bodyW * 0.22, wingY + wingH / 2);
+    ctx.stroke();
+
+    // ปีกหลัง: แผ่นแนวนอนกว้างเกือบเท่าระยะล้อ + ปีกข้าง (endplate) สองด้าน
+    ctx.fillStyle = "#161616";
+    ctx.fillRect(baseX - trackW * 0.42, wingY - wingH / 2, trackW * 0.84, wingH);
+    ctx.fillRect(baseX - trackW * 0.42, wingY - wingH * 1.6, wingH * 0.5, wingH * 3.2);
+    ctx.fillRect(baseX + trackW * 0.42 - wingH * 0.5, wingY - wingH * 1.6, wingH * 0.5, wingH * 3.2);
+  }
+
+  // ห้องนักขับ: ฮาโล + ปีกหน้ารถ + จมูกรถ + พวงมาลัย + กระจกมองข้าง วาดตรงส่วนล่าง/บนของจอเสมอ
+  // (ไม่ขยับตามโลกเกม) ให้เห็นบางส่วนของตัวรถแข่งจริง ๆ เหมือนนั่งอยู่ในรถ ตามที่เต้ขอ
+  function drawHood() {
+    // เสาฮาโล (โครงนิรภัยโค้งเหนือหัวคนขับ) แบบรถ F1 จริง โค้งอยู่เหนือมุมมองนิดหน่อย
+    ctx.strokeStyle = "rgba(15,15,20,0.85)";
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.15, horizonY + 60);
+    ctx.quadraticCurveTo(canvas.width * 0.5, horizonY - 40, canvas.width * 0.85, horizonY + 60);
+    ctx.stroke();
+
+    // ปีกหน้ารถ (front wing) โผล่ออกมาจากขอบล่างสองมุม
+    ctx.fillStyle = "#161616";
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height);
+    ctx.lineTo(canvas.width * 0.24, canvas.height);
+    ctx.lineTo(canvas.width * 0.32, canvas.height * 0.91);
+    ctx.lineTo(0, canvas.height * 0.91);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(canvas.width, canvas.height);
+    ctx.lineTo(canvas.width * 0.76, canvas.height);
+    ctx.lineTo(canvas.width * 0.68, canvas.height * 0.91);
+    ctx.lineTo(canvas.width, canvas.height * 0.91);
+    ctx.closePath();
+    ctx.fill();
+
+    // จมูกรถ (nose cone) ตรงกลาง ไล่สีให้ดูมีมิติ (สว่างด้านบน มืดลงด้านล่าง)
+    // เต้ขอลดความยาวลงจากรอบก่อน (0.66) มาอยู่กึ่งกลางที่ 0.72 ของความสูงจอ
+    let hoodGrad = ctx.createLinearGradient(0, canvas.height * 0.72, 0, canvas.height);
+    hoodGrad.addColorStop(0, carColor);
+    hoodGrad.addColorStop(1, "#11294f");
+    ctx.fillStyle = hoodGrad;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.36, canvas.height);
+    ctx.lineTo(canvas.width * 0.5, canvas.height * 0.72);
+    ctx.lineTo(canvas.width * 0.64, canvas.height);
+    ctx.closePath();
+    ctx.fill();
+
+    // สันไฮไลท์กลางจมูกรถ + เบอร์รถของเต้
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.5, canvas.height * 0.72);
+    ctx.lineTo(canvas.width * 0.5, canvas.height);
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 16px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("10", canvas.width * 0.5, canvas.height * 0.965);
+
+    // กระจกมองข้างซ้าย-ขวา
+    ctx.fillStyle = "#1a1a1a";
+    ctx.beginPath();
+    ctx.ellipse(canvas.width * 0.06, canvas.height * 0.78, 16, 10, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(canvas.width * 0.94, canvas.height * 0.78, 16, 10, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // พวงมาลัย: ครึ่งวงกลมเข้ม ๆ พร้อมก้านกลาง อยู่กึ่งกลางล่างจอ
+    let wheelX = canvas.width / 2, wheelY = canvas.height - 4, wheelR = 34;
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(wheelX, wheelY, wheelR, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(wheelX, wheelY - wheelR * 0.8);
+    ctx.lineTo(wheelX, wheelY);
+    ctx.stroke();
+  }
+
+  // ตำแหน่งรถของเต้: carPos คือจุดกึ่งกลางรถ, carAngle คือมุมที่รถหันหน้าอยู่ (0 = หันขึ้น)
+  let carPos = { x: trackPoints[0].x, y: trackPoints[0].y };
+  let carAngle = Math.atan2(
+    trackPoints[1].x - trackPoints[0].x,
+    -(trackPoints[1].y - trackPoints[0].y)
+  ); // เริ่มต้นหันหน้าไปตามทิศทางของทางตรงช่วงแรก
+
+  // สีรถของเต้ (เต้เลือกเองว่าน้ำเงิน)
+  let carColor = "#2b6fd6";
+
+  // รถคู่แข่ง (AI): วิ่งไปตามเส้นกึ่งกลางถนน (trackSamples) เองอัตโนมัติ เหยียบคันเร่งเต็มที่ตลอด
+  // ใช้ accel/maxSpeed ตัวเดียวกับเต้เป๊ะ ๆ เลยมีความเร็วสูงสุดเท่ากับรถเต้จริง ๆ
+  // rivalArcLength คือระยะทางสะสมที่วิ่งไปแล้วตามเส้นทาง (วนกลับมาที่ 0 ทุกครบรอบ)
+  let rivalArcLength = 0; // เริ่มที่เส้นสตาร์ทเดียวกับเต้ (trackSamples[0] คือจุดเริ่ม/จบ เหมือนกับ carPos เริ่มต้น)
+  let rivalSpeedCurrent = 0; // ความเร็วปัจจุบันของคู่แข่ง (ไต่ขึ้นด้วย accel เหมือนเต้)
+  let rivalBoostTimer = 0;   // ตัวจับเวลาบูสต์ของคู่แข่ง แยกจากของเต้ เผื่อเก็บไอเทมได้
+  let rivalColor = "#ffb300"; // สีส้มทอง แยกจากรถเต้ (น้ำเงิน) และลูกศรเต้บนแผนที่ (แดง) ให้ชัดเจน
+  let rivalLateralOffset = trackWidth * 0.13; // เยื้องข้างเต้เสมอ (เต้ขอให้อยู่ใกล้ๆ กันมากขึ้นกว่าเดิม แต่ไม่ทับเส้นเดียวกัน)
+
+  // หาตำแหน่ง (x, y) และทิศที่หันหน้าอยู่ บนเส้นกึ่งกลางถนน ณ ระยะทางสะสม arcLength ใด ๆ (วนรอบเส้นทางให้อัตโนมัติ)
+  function getPointAtArcLength(arcLength) {
+    let n = trackSamples.length;
+    let totalLength = n * trackSampleGap;
+    let wrapped = ((arcLength % totalLength) + totalLength) % totalLength;
+    let idxFloat = wrapped / trackSampleGap;
+    let i0 = Math.floor(idxFloat) % n;
+    let i1 = (i0 + 1) % n;
+    let t = idxFloat - Math.floor(idxFloat);
+    let s0 = trackSamples[i0], s1 = trackSamples[i1];
+    return {
+      x: s0.cx + (s1.cx - s0.cx) * t,
+      y: s0.cy + (s1.cy - s0.cy) * t,
+      angle: s0.perpAngle - Math.PI / 2, // perpAngle ตั้งฉากกับทิศวิ่ง เลยต้องหมุนกลับ 90 องศา ให้เป็นทิศที่หันหน้า
+    };
+  }
+
+  // ตำแหน่งจริงของรถคู่แข่ง = จุดบนเส้นกึ่งกลางถนน เยื้องออกด้านข้างด้วย rivalLateralOffset
+  // ให้วิ่งขนานอยู่ข้างเต้เสมอ ไม่ทับเส้นเดียวกัน (ใช้ทั้งตอนวาดรถ, เช็คไอเทม, และจุดบนแผนที่ย่อ)
+  function getRivalPoint() {
+    let p = getPointAtArcLength(rivalArcLength);
+    let perp = p.angle + Math.PI / 2;
+    return {
+      x: p.x + Math.cos(perp) * rivalLateralOffset,
+      y: p.y + Math.sin(perp) * rivalLateralOffset,
+      angle: p.angle,
+    };
+  }
+
+  // ค่าต่าง ๆ ของการขับรถ เต้ลองเปลี่ยนตัวเลขพวกนี้ดูได้ว่าขับแล้วรู้สึกต่างกันยังไง
+  let carSpeed = 0;      // ความเร็วตอนนี้ (ติดลบ = ถอยหลัง)
+  let maxSpeed = 9.0;    // ความเร็วสูงสุดตอนวิ่งไปข้างหน้า (360 กม./ชม. ตามที่เต้ขอ)
+  let accel = 0.045;     // กด W/ลูกศรขึ้น แล้วเร่งเร็วขึ้นทีละเท่าไหร่ (เต้ขอให้รอบขึ้นช้าลงกว่าเดิมอีกรอบ)
+  let brakeDecel = 0.4;  // กด S/ลูกศรลง แล้วเบรก/ถอยหลังทีละเท่าไหร่
+  let friction = 0.08;   // ไม่ได้กดอะไร ความเร็วจะค่อย ๆ ลดลงเองทีละเท่าไหร่
+  let turnRate = 0.05;   // กด A/D แล้วหมุนตัวรถทีละกี่เรเดียน
+
+  // moveUp/Down คือคันเร่ง/เบรก, moveLeft/Right คือพวงมาลัยเลี้ยวซ้าย-ขวา
+  let moveUp = false;
+  let moveDown = false;
+  let moveLeft = false;
+  let moveRight = false;
+
+  // สัญญาณไฟปล่อยตัว (เหมือน F1 จริง): ไฟแดงติดทีละดวงจนครบ 5 ดวง แล้วดับพร้อมกันทั้งหมด = ออกตัวได้
+  // ระหว่างไฟยังไม่ดับ รถจะขยับไม่ได้เลย (กันออกตัวก่อนสัญญาณ เหมือนกติกาจริง)
+  let raceState = "countdown"; // "countdown" = กำลังรอสัญญาณไฟ, "go" = ออกตัวได้แล้ว
+  let startSequenceTick = 0;
+  let countdownLightsOn = 0;
+  let ticksPerLight = 20; // ~0.6 วินาทีต่อดวง (game loop วนทุก 30 มิลลิวินาที)
+  let goTextTimer = 0; // นับถอยหลังตอนโชว์คำว่า "GO!" หลังไฟดับ
+
+  // ตัวจับเวลาการแข่งขัน + นับจำนวนรอบ
+  let raceTimerMs = 0;        // เวลาที่ผ่านไปตั้งแต่ไฟดับ (มิลลิวินาที)
+  let lapCount = 0;           // จบไปกี่รอบแล้ว
+  let lastLapTimeMs = 0;      // เวลาสะสม ณ ตอนจบรอบล่าสุด (ไว้คำนวณรอบถัดไป)
+  let lastLapDurationMs = 0;  // ใช้เวลากี่มิลลิวินาทีในรอบล่าสุดที่จบ
+  let showLapTimeUntil = 0;   // โชว์ป้าย "จบรอบที่ X" ไปจนถึงเวลาสะสมเท่าไหร่
+  // รถเกิดอยู่บนเส้นเริ่ม/จบพอดี ต้องขับไปถึง "ฝั่งตรงข้าม" ของสนามก่อนสักครั้ง ถึงจะยอมนับว่าผ่านเส้นชัย
+  // ครบรอบจริง ๆ (กันไม่ให้จุดที่ใกล้ที่สุดสั่นไหวแถวเส้นเริ่ม/จบตอนออกตัว แล้วดันไปนับเป็นรอบทันที)
+  let hasReachedFarSide = false;
+
+  // ตัวจับเวลาบูสต์ความเร็ว: มากกว่า 0 แปลว่ากำลังบูสต์อยู่ (ยกเพดานความเร็วสูงสุดขึ้นชั่วคราว)
+  let boostTimer = 0;
+
+  // เสียงเครื่องยนต์รถ ทำเองสด ๆ ด้วย Web Audio API (ไม่ต้องมีไฟล์เสียงแยกเลย)
+  // เบราว์เซอร์จะไม่ยอมให้เล่นเสียงเองจนกว่าเต้จะกดปุ่มอะไรสักครั้งก่อน (initAudio เลยถูกเรียกตอนกดปุ่มครั้งแรก)
+  let audioCtx = null;
+  let engineOsc = null;   // เสียงหลัก (ความถี่ต่ำสุดในสามชั้น)
+  let engineOsc2 = null;  // ฮาร์โมนิกสูงกว่า ให้เสียงกร้าน-แหลมคมแบบเครื่อง F1 จริง (ไม่ใช่เสียงทุ้มรถทั่วไป)
+  let engineOsc3 = null;  // เสียงหวีดแหลมบนสุด เหมือนเสียงกรี๊ดตอนรอบเครื่องจัด
+  let engineGain2 = null;
+  let engineGain3 = null;
+  let engineFilter = null;
+  let engineGain = null;
+  let shiftClickBuffer = null; // เสียง "คลิก" สั้น ๆ ตอนเปลี่ยนเกียร์ เตรียมไว้ล่วงหน้าครั้งเดียว
+
+  function initAudio() {
+    if (audioCtx) {
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return;
+    }
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // เครื่องยนต์ V8 จริงเสียงทุ้มหนัก-กระเดือกเป็นจังหวะ (8 สูบจุดระเบิดไม่เท่ากันทำให้เสียง "เต้น" เป็นห้วง ๆ)
+    // ไม่แหลมคมแบบ F1 เลยใช้เสียงหลัก + เสียงเพี้ยนนิดหน่อยให้หนา + เสียงทุ้มต่ำอีกอ็อกเทฟให้มีน้ำหนัก
+    engineOsc = audioCtx.createOscillator();
+    engineOsc.type = "sawtooth"; // เสียงฟันปลา กร้าน ๆ เหมือนเครื่องยนต์
+    engineOsc.frequency.value = 90;
+
+    engineOsc2 = audioCtx.createOscillator();
+    engineOsc2.type = "triangle"; // กลมกว่าฟันปลา ไม่มีเสียงแหลมคมมากวนหู
+    engineOsc2.frequency.value = 90 * 1.008; // เพี้ยนนิดเดียวจากเสียงหลัก ให้เสียงหนาขึ้นแบบเครื่องหลายสูบ
+
+    engineOsc3 = audioCtx.createOscillator();
+    engineOsc3.type = "sine"; // เสียงทุ้มเรียบ เสริมน้ำหนักเบส
+    engineOsc3.frequency.value = 45; // ต่ำกว่าเสียงหลักหนึ่งอ็อกเทฟ
+
+    engineGain2 = audioCtx.createGain();
+    engineGain2.gain.value = 0.6; // เสียงเพี้ยนหนา ๆ ดังใกล้เคียงเสียงหลัก
+    engineGain3 = audioCtx.createGain();
+    engineGain3.gain.value = 0.5; // เสียงเบสหนักพอสมควร
+
+    engineFilter = audioCtx.createBiquadFilter();
+    engineFilter.type = "lowpass"; // กรองเสียงแหลมออก ให้ฟังทุ้มหนักแบบเครื่อง V8 ไม่แหลมคมแบบ F1
+    engineFilter.frequency.value = 650; // เต้บอกว่ายังมีเสียงกรี๊ดแหลมหลงเหลืออยู่ เลยกรองให้ต่ำลงอีก ตัดเสียงแหลมออกให้หมด
+    engineFilter.Q.value = 0.3;
+
+    engineGain = audioCtx.createGain();
+    engineGain.gain.value = 0; // เริ่มจากเงียบก่อน ค่อย ๆ ดังขึ้นตามความเร็ว
+
+    engineOsc.connect(engineFilter);
+    engineOsc2.connect(engineGain2);
+    engineGain2.connect(engineFilter);
+    engineOsc3.connect(engineGain3);
+    engineGain3.connect(engineFilter);
+    engineFilter.connect(engineGain);
+    engineGain.connect(audioCtx.destination);
+    engineOsc.start();
+    engineOsc2.start();
+    engineOsc3.start();
+
+    // จังหวะกระเดือกทุ้ม ๆ (burble) เหมือนไอเสียเครื่อง V8 จริง: LFO ความถี่ต่ำ มอดูเลตความดังเบา ๆ เป็นจังหวะ
+    let engineLfo = audioCtx.createOscillator();
+    engineLfo.type = "sine";
+    engineLfo.frequency.value = 40;
+    let engineLfoGain = audioCtx.createGain();
+    engineLfoGain.gain.value = 0.025;
+    engineLfo.connect(engineLfoGain);
+    engineLfoGain.connect(engineGain.gain);
+    engineLfo.start();
+
+    // สร้างเสียงคลิกไว้ล่วงหน้า: เสียงซ่าสั้น ๆ 60 มิลลิวินาที ค่อย ๆ เบาลงจนเงียบ (ฟังดูเหมือน "แชะ" ตอนเข้าเกียร์)
+    let clickLen = Math.floor(audioCtx.sampleRate * 0.06);
+    shiftClickBuffer = audioCtx.createBuffer(1, clickLen, audioCtx.sampleRate);
+    let data = shiftClickBuffer.getChannelData(0);
+    for (let i = 0; i < clickLen; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / clickLen);
+    }
+  }
+
+  // เล่นเสียงคลิกตอนเปลี่ยนเกียร์ (เล่นเสียงที่เตรียมไว้แล้วครั้งเดียวจบ)
+  function playShiftClick() {
+    if (!audioCtx || !shiftClickBuffer) return;
+    let src = audioCtx.createBufferSource();
+    src.buffer = shiftClickBuffer;
+    let clickGain = audioCtx.createGain();
+    clickGain.gain.value = 0.35;
+    src.connect(clickGain);
+    clickGain.connect(audioCtx.destination);
+    src.start();
+  }
+
+  // ระบบเกียร์รถ: เกียร์ 1-6 แบบเกียร์อัตโนมัติ เปลี่ยนเองตามความเร็ว (กม./ชม.)
+  // ตัวเลขคือ "เพดานความเร็ว" ของแต่ละเกียร์ ยิ่งเกียร์สูงยิ่งวิ่งได้เร็วขึ้น เหมือนรถจริง
+  let gearCeilingsKmh = [60, 120, 180, 240, 300, 340]; // เต้กำหนดเพดานความเร็วของแต่ละเกียร์เอง
+  let currentGear = 1;
+  let engineRpmFraction = 0; // 0-1 คืออยู่ตรงไหนของช่วงเกียร์ปัจจุบัน ใช้ทั้งเสียงเครื่องยนต์และจอวัดรอบ (RPM)
+
+  // ปรับระดับเสียง/ความสูงต่ำของเครื่องยนต์ + เปลี่ยนเกียร์เองอัตโนมัติ เรียกทุกครั้งใน game loop
+  function updateEngineSound() {
+    let speedKmh = Math.abs(carSpeed) * 40;
+
+    // หาว่าตอนนี้ควรอยู่เกียร์ไหน แล้วอยู่ตรงไหนของช่วงเกียร์นั้น (0 = เพิ่งเข้าเกียร์, 1 = ใกล้จะเปลี่ยนเกียร์ถัดไป)
+    let floorKmh = 0;
+    let gear = 1;
+    for (let i = 0; i < gearCeilingsKmh.length; i++) {
+      let ceilKmh = gearCeilingsKmh[i];
+      if (speedKmh <= ceilKmh || i === gearCeilingsKmh.length - 1) {
+        gear = i + 1;
+        engineRpmFraction = ceilKmh > floorKmh ? Math.min(1, Math.max(0, (speedKmh - floorKmh) / (ceilKmh - floorKmh))) : 1;
+        break;
+      }
+      floorKmh = ceilKmh;
+    }
+    if (gear !== currentGear) {
+      currentGear = gear;
+      if (audioCtx) playShiftClick();
+    }
+
+    if (!audioCtx) return;
+    let speedRatio = Math.min(1, speedKmh / speedGaugeMaxKmh);
+    let targetFreq = 90 + engineRpmFraction * 260; // ไล่เสียงสูงขึ้นในเกียร์เดิม แล้วรีเซ็ตต่ำลงตอนเปลี่ยนเกียร์ (ทุ้มแบบ V8 ไม่กรี๊ดสูงแบบ F1)
+    let targetGain = raceState === "go" ? 0.05 + speedRatio * 0.15 : 0.04; // ตอนรอไฟ มีเสียงเดินเบา ๆ
+    let now = audioCtx.currentTime;
+    // สามชั้นเสียงไล่ความถี่ตามกัน: เสียงหลัก + เสียงเพี้ยนหนา + เสียงเบสต่ำอ็อกเทฟ
+    engineOsc.frequency.setTargetAtTime(targetFreq, now, 0.08);
+    engineOsc2.frequency.setTargetAtTime(targetFreq * 1.008, now, 0.08);
+    engineOsc3.frequency.setTargetAtTime(targetFreq * 0.5, now, 0.08);
+    engineGain.gain.setTargetAtTime(targetGain, now, 0.08);
+  }
+
+  // แปลงมิลลิวินาที ให้เป็นตัวหนังสือ นาที:วินาที.เศษวินาที อ่านง่าย
+  function formatTime(ms) {
+    let totalMs = Math.max(0, Math.floor(ms));
+    let min = Math.floor(totalMs / 60000);
+    let sec = Math.floor((totalMs % 60000) / 1000);
+    let cs = Math.floor((totalMs % 1000) / 10);
+    let secStr = sec < 10 ? "0" + sec : "" + sec;
+    let csStr = cs < 10 ? "0" + cs : "" + cs;
+    return min + ":" + secStr + "." + csStr;
+  }
+
+  // จอบอกเวลาแข่ง + จำนวนรอบ อยู่มุมซ้ายบนจอ
+  function drawTimerHUD() {
+    let boxX = 20, boxY = 20, boxW = 210, boxH = 92;
+    ctx.fillStyle = "rgba(10,10,20,0.55)";
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.font = "bold 28px sans-serif";
+    ctx.fillText(formatTime(raceTimerMs), boxX + 14, boxY + 36);
+
+    ctx.font = "14px sans-serif";
+    ctx.fillText("รอบที่ " + lapCount, boxX + 14, boxY + 60);
+    if (lapCount > 0) {
+      ctx.fillText("รอบล่าสุด: " + formatTime(lastLapDurationMs), boxX + 14, boxY + 80);
+    }
+  }
+
+  // ป้ายเหลืองโชว์แว้บหนึ่งตอนวิ่งผ่านเส้นเริ่ม/จบครบ 1 รอบ
+  function drawLapPopup() {
+    ctx.fillStyle = "rgba(255,220,0,0.95)";
+    ctx.textAlign = "center";
+    ctx.font = "bold 36px sans-serif";
+    ctx.fillText("จบรอบที่ " + lapCount + " (" + formatTime(lastLapDurationMs) + ")", canvas.width / 2, canvas.height * 0.18);
+  }
+
+  // วาดแผงสัญญาณไฟปล่อยตัว 5 ดวง อยู่กึ่งกลางด้านบนจอ
+  function drawStartLights() {
+    let lightCount = 5;
+    let lightR = 18;
+    let spacing = 50;
+    let totalW = (lightCount - 1) * spacing;
+    let startX = canvas.width / 2 - totalW / 2;
+    let y = 90;
+
+    ctx.fillStyle = "rgba(10,10,10,0.85)";
+    ctx.fillRect(startX - 35, y - 35, totalW + 70, 70);
+    ctx.strokeStyle = "#555";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(startX - 35, y - 35, totalW + 70, 70);
+
+    for (let i = 0; i < lightCount; i++) {
+      let lx = startX + i * spacing;
+      let on = i < countdownLightsOn;
+      if (on) {
+        let glow = ctx.createRadialGradient(lx, y, 0, lx, y, lightR * 1.8);
+        glow.addColorStop(0, "rgba(255,40,40,0.9)");
+        glow.addColorStop(1, "rgba(255,40,40,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(lx, y, lightR * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = on ? "#ff2222" : "#3a1010";
+      ctx.beginPath();
+      ctx.arc(lx, y, lightR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // ตัวหนังสือ "GO!" โชว์แว้บหนึ่งตอนไฟดับพอดี
+  function drawGoText() {
+    ctx.fillStyle = "rgba(255,220,0,0.95)";
+    ctx.textAlign = "center";
+    ctx.font = "bold 90px sans-serif";
+    ctx.fillText("GO!", canvas.width / 2, canvas.height * 0.42);
+  }
+
+  // เส้นความเร็ว: ยิ่งรถวิ่งเร็วยิ่งมีเส้นจาง ๆ พุ่งออกจากกลางจอ ให้รู้สึกถึงความเร็ว
+  function drawSpeedLines() {
+    let speedFactor = Math.max(0, (Math.abs(carSpeed) - 4) / (maxSpeed - 4));
+    if (speedFactor <= 0) return;
+    let cx = canvas.width / 2, cy = horizonY + 40;
+    ctx.lineWidth = 2;
+    let lineCount = 16;
+    for (let k = 0; k < lineCount; k++) {
+      let ang = (k / lineCount) * Math.PI * 2;
+      let innerR = 60, outerR = 60 + 260 * speedFactor;
+      ctx.strokeStyle = "rgba(255,255,255," + (0.18 * speedFactor) + ")";
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR * 0.4);
+      ctx.lineTo(cx + Math.cos(ang) * outerR, cy + Math.sin(ang) * outerR * 0.4);
+      ctx.stroke();
+    }
+  }
+
+  // ฟังก์ชันวาดภาพทั้งหมด: ท้องฟ้า+หญ้า -> ต้นไม้+ไฟสปอตไลท์+ป้ายบอกโค้ง+ป้ายซุ้ม -> ถนนมุมมอง FPV -> เส้นความเร็ว
+  // -> ฝากระโปรงรถ -> แผนที่สนาม -> จอบอกความเร็ว -> สัญญาณไฟปล่อยตัว/ตัวหนังสือ GO!
+  function draw() {
+    drawSkyAndGrass();
+    drawTrees();
+    drawFloodlights();
+    drawCornerSigns();
+    drawStartGantry();
+    drawItems();
+    drawTrackFPV();
+    drawRivalCar();
+    drawSpeedLines();
+    drawHood();
+    drawMiniMap();
+    drawSpeedometer();
+    drawTachometer();
+    drawTimerHUD();
+    if (raceState === "countdown") drawStartLights();
+    if (goTextTimer > 0) drawGoText();
+    if (raceState === "go" && raceTimerMs < showLapTimeUntil) drawLapPopup();
+  }
+
+  // ฟังปุ่มที่เต้กด (ลูกศร หรือ WASD ก็ได้เหมือนกัน)
+  // W/ลูกศรขึ้น = คันเร่ง, S/ลูกศรลง = เบรก/ถอยหลัง, A/D = หมุนพวงมาลัยซ้าย-ขวา
+  document.addEventListener("keydown", function (e) {
+    initAudio(); // กดปุ่มครั้งแรก แล้วเริ่มเสียงเครื่องยนต์
+    let key = e.key.toLowerCase();
+    if (e.key === "ArrowRight" || key === "d") moveRight = true;
+    if (e.key === "ArrowLeft" || key === "a") moveLeft = true;
+    if (e.key === "ArrowUp" || key === "w") moveUp = true;
+    if (e.key === "ArrowDown" || key === "s") moveDown = true;
+  });
+
+  // พอปล่อยปุ่ม ให้หยุดทำท่านั้น
+  document.addEventListener("keyup", function (e) {
+    let key = e.key.toLowerCase();
+    if (e.key === "ArrowRight" || key === "d") moveRight = false;
+    if (e.key === "ArrowLeft" || key === "a") moveLeft = false;
+    if (e.key === "ArrowUp" || key === "w") moveUp = false;
+    if (e.key === "ArrowDown" || key === "s") moveDown = false;
+  });
+
+  // game loop: คำนวณฟิสิกส์การขับรถซ้ำ ๆ เร็วมาก (ทุก 30 มิลลิวินาที)
+  setInterval(function () {
+    updateEngineSound(); // ปรับเสียงเครื่องยนต์ทุกรอบ ไม่ว่าจะรอไฟหรือกำลังแข่งอยู่
+
+    // ระหว่างรอสัญญาณไฟปล่อยตัว รถขยับไม่ได้เลย แค่นับเวลาติดไฟทีละดวงไปเรื่อย ๆ
+    if (raceState === "countdown") {
+      startSequenceTick++;
+      countdownLightsOn = Math.min(5, Math.floor(startSequenceTick / ticksPerLight));
+      if (startSequenceTick > 5 * ticksPerLight + 25) {
+        raceState = "go";
+        goTextTimer = 30; // โชว์คำว่า GO! ไว้ประมาณ 1 วินาที
+      }
+      draw();
+      return;
+    }
+    if (goTextTimer > 0) goTextTimer--;
+    raceTimerMs += 30; // นาฬิกาจับเวลาแข่งเดินไปเรื่อย ๆ ตั้งแต่ไฟดับ
+    if (boostTimer > 0) boostTimer--; // นับถอยหลังช่วงบูสต์ความเร็วจากไอเทม
+    // คู่แข่งเหยียบคันเร่งเต็มที่ตลอด ไต่ความเร็วขึ้นด้วย accel ตัวเดียวกับเต้ (ความเร็วสูงสุดเท่ากัน)
+    if (rivalBoostTimer > 0) rivalBoostTimer--;
+    let rivalEffectiveMax = rivalBoostTimer > 0 ? maxSpeed * 2.0 : maxSpeed;
+    rivalSpeedCurrent = Math.min(rivalEffectiveMax, rivalSpeedCurrent + accel);
+    rivalArcLength += rivalSpeedCurrent;
+
+    // คู่แข่งก็เก็บไอเทมบูสต์ความเร็วได้เหมือนเต้ (ยกเว้นไอเทม playerOnly ที่เก็บได้แค่เต้คนเดียว)
+    let rivalPos = getRivalPoint();
+    for (let item of itemSpots) {
+      if (!item.active || item.playerOnly) continue;
+      let rdx = rivalPos.x - item.cx, rdy = rivalPos.y - item.cy;
+      if (rdx * rdx + rdy * rdy < itemPickupRadius * itemPickupRadius) {
+        item.active = false;
+        rivalSpeedCurrent *= 2.0;
+        rivalBoostTimer = 90;
+      }
+    }
+
+    // คันเร่ง / เบรก
+    if (moveUp) {
+      carSpeed += accel;
+    } else if (moveDown) {
+      carSpeed -= brakeDecel;
+    } else {
+      // ไม่ได้กดอะไร ความเร็วค่อย ๆ ลดลงเอง (แรงเสียดทาน)
+      if (carSpeed > 0) carSpeed = Math.max(0, carSpeed - friction);
+      else if (carSpeed < 0) carSpeed = Math.min(0, carSpeed + friction);
+    }
+    // ตอนบูสต์อยู่ เพดานความเร็วสูงสุดจะสูงขึ้นชั่วคราว (เกียร์ตอนนี้เป็นออโต้ล้วน ๆ แค่เรื่องเสียง/จอวัดรอบ ไม่จำกัดความเร็วจริง)
+    let effectiveMaxSpeed = boostTimer > 0 ? maxSpeed * 2.0 : maxSpeed;
+    carSpeed = Math.max(-effectiveMaxSpeed / 2, Math.min(effectiveMaxSpeed, carSpeed));
+
+    // เลี้ยวได้ก็ต่อเมื่อรถกำลังวิ่งอยู่ (เหมือนรถจริง จอดนิ่งแล้วหมุนตัวเองไม่ได้)
+    if (Math.abs(carSpeed) > 0.3) {
+      if (moveLeft) carAngle -= turnRate;
+      if (moveRight) carAngle += turnRate;
+    }
+
+    // ขยับรถไปตามทิศที่หันหน้าอยู่ ด้วยความเร็วปัจจุบัน
+    carPos.x += Math.sin(carAngle) * carSpeed;
+    carPos.y -= Math.cos(carAngle) * carSpeed;
+
+    // ชนกำแพงกันชนแล้วทะลุผ่านไม่ได้: หาขอบถนนที่ใกล้รถที่สุด แล้วดันรถกลับเข้ามาถ้าล้ำออกไปเกินกำแพง
+    let wallLimit = (trackWidth + 16 * worldScale) / 2 + 16 * worldScale;
+    let prevNearestIndex = lastNearestIndex;
+    let nearest = findNearestSample(carPos.x, carPos.y);
+
+    // ต้องขับไปถึงฝั่งตรงข้ามของสนาม (ประมาณกึ่งกลางรอบ) มาก่อนสักครั้ง ถึงจะเริ่มนับว่าผ่านเส้นชัยจริง ๆ
+    let sampleCount = trackSamples.length;
+    if (lastNearestIndex > sampleCount * 0.4 && lastNearestIndex < sampleCount * 0.6) {
+      hasReachedFarSide = true;
+    }
+
+    // ตรวจว่าวิ่งผ่านเส้นเริ่ม/จบไปแล้วหรือยัง (ดัชนีจุดใกล้สุดวนจากท้ายแถวกลับมาต้นแถวพอดี = ครบ 1 รอบ)
+    if (hasReachedFarSide && prevNearestIndex > sampleCount * 0.8 && lastNearestIndex < sampleCount * 0.2) {
+      lapCount++;
+      lastLapDurationMs = raceTimerMs - lastLapTimeMs;
+      lastLapTimeMs = raceTimerMs;
+      hasReachedFarSide = false; // เริ่มนับรอบใหม่ ต้องไปถึงฝั่งตรงข้ามอีกครั้งก่อนถึงจะนับรอบถัดไปได้
+      showLapTimeUntil = raceTimerMs + 3000;
+      for (let item of itemSpots) item.active = true; // ครบรอบใหม่ ไอเทมกลับมาให้เก็บได้อีกครั้ง
+    }
+
+    let ndx = carPos.x - nearest.cx, ndy = carPos.y - nearest.cy;
+    let cosP = Math.cos(nearest.perpAngle), sinP = Math.sin(nearest.perpAngle);
+    let lateralOffset = ndx * cosP + ndy * sinP;
+    if (lateralOffset > wallLimit) {
+      let excess = lateralOffset - wallLimit;
+      carPos.x -= cosP * excess;
+      carPos.y -= sinP * excess;
+      carSpeed *= 0.3; // ชนกำแพง ความเร็วลดฮวบเหมือนชนจริง
+    } else if (lateralOffset < -wallLimit) {
+      let excess = -wallLimit - lateralOffset;
+      carPos.x += cosP * excess;
+      carPos.y += sinP * excess;
+      carSpeed *= 0.3;
+    }
+
+    // ชนไอเทมความเร็วแล้ว: เพิ่มความเร็วขึ้น 100% (เร็วเป็น 2 เท่า) ทันที และยกเพดานความเร็วสูงสุดชั่วคราวไม่ให้โดนหักกลับ
+    // เต้เก็บได้แค่ดาวฟ้า (playerOnly) เท่านั้น ดาวเหลืองเก็บไม่ได้แล้วตามที่เต้ขอ
+    for (let item of itemSpots) {
+      if (!item.active || !item.playerOnly) continue;
+      let idx = carPos.x - item.cx, idy = carPos.y - item.cy;
+      if (idx * idx + idy * idy < itemPickupRadius * itemPickupRadius) {
+        item.active = false;
+        carSpeed *= 2.0;
+        boostTimer = 90; // บูสต์เพดานความเร็วไว้ประมาณ 2.7 วินาที กันความเร็วที่เพิ่มมาโดนหักกลับทันที
+      }
+    }
+
+    draw();
+  }, 30);
+
+  draw();
+</script>
+
+</body>
+</html>
